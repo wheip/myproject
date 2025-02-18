@@ -9,4 +9,6 @@ Makefile.Debug
 Makefile.Release
 release/
 debug/
+.nextcloudsync.log
+.qmake.stash
 
