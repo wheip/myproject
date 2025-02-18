@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>2168</width>
+    <height>1075</height>
+   </rect>
+  </property>
+  <property name="font">
+   <font>
+    <pointsize>14</pointsize>
+   </font>
+  </property>
+  <property name="windowTitle">
+   <string>MainWindow</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QGridLayout" name="gridLayout_3">
+    <item row="0" column="0">
+     <widget class="QGroupBox" name="groupBox">
+      <property name="title">
+       <string/>
+      </property>
+      <layout class="QGridLayout" name="gridLayout_2">
+       <item row="0" column="0">
+        <layout class="QGridLayout" name="display"/>
+       </item>
+      </layout>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>2168</width>
+     <height>24</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menu">
+    <property name="font">
+     <font>
+      <pointsize>14</pointsize>
+     </font>
+    </property>
+    <property name="title">
+     <string>菜单</string>
+    </property>
+    <addaction name="actionPCB"/>
+    <addaction name="actiondevicemanage"/>
+    <addaction name="actiontesttaskmanage"/>
+    <addaction name="actiontaskmanage"/>
+    <addaction name="actiontest"/>
+   </widget>
+   <widget class="QMenu" name="menu_selectdevice">
+    <property name="title">
+     <string>选择被测设备</string>
+    </property>
+    <widget class="QMenu" name="menulistselect">
+     <property name="title">
+      <string>列表选择</string>
+     </property>
+    </widget>
+    <addaction name="actionautodetect"/>
+    <addaction name="menulistselect"/>
+   </widget>
+   <addaction name="menu"/>
+   <addaction name="menu_selectdevice"/>
+  </widget>
+  <action name="actionPCBshibie">
+   <property name="text">
+    <string>PCBshibie</string>
+   </property>
+  </action>
+  <action name="actionPCB">
+   <property name="text">
+    <string>PCB识别</string>
+   </property>
+   <property name="font">
+    <font>
+     <pointsize>14</pointsize>
+    </font>
+   </property>
+  </action>
+  <action name="actiondevicemanage">
+   <property name="text">
+    <string>被测设备管理 </string>
+   </property>
+  </action>
+  <action name="actiontesttaskmanage">
+   <property name="text">
+    <string>测试任务管理</string>
+   </property>
+  </action>
+  <action name="actiontaskmanage">
+   <property name="text">
+    <string>任务执行与查看</string>
+   </property>
+  </action>
+  <action name="actiontest">
+   <property name="text">
+    <string>测试</string>
+   </property>
+  </action>
+  <action name="actionautodetect">
+   <property name="text">
+    <string>自动识别</string>
+   </property>
+  </action>
+  <action name="actiontyi">
+   <property name="text">
+    <string>tyi</string>
+   </property>
+  </action>
+  <action name="actionlkjfslj">
+   <property name="text">
+    <string>lkjfslj</string>
+   </property>
+  </action>
+  <action name="actionjty">
+   <property name="text">
+    <string>jty</string>
+   </property>
+  </action>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

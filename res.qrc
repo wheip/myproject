@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/">
+        <file>image/OIP.jpg</file>
+        <file>image/expand.png</file>
+    </qresource>
+</RCC>

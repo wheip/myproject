@@ -1,0 +1,12 @@
+build/
+*.pro.user
+.vscode/
+bin/
+lib/
+include/
+Makefile
+Makefile.Debug
+Makefile.Release
+release/
+debug/
+
