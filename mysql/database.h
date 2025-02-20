@@ -11,6 +11,7 @@
 #include <string>
 #include <QObject>
 #include <QMutex>
+#include "siftmatcher.h"
 
 class Database : public QObject
 {

@@ -22,6 +22,9 @@
 #include "labelediting.h"
 #include "deviceid.h"
 #include <iostream>
+#include "siftmatcher.h"
+#include "previewdialog.h"
+#include "imageflowdialog.h"
 
 using namespace std;
 QT_BEGIN_NAMESPACE
@@ -84,5 +87,6 @@ private:
 
     void yolomodel_init();
     void InitListSelectDevice();
+    void onImageCaptured(const cv::Mat& image);
 };
 #endif // MAINWINDOW_H

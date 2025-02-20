@@ -38,7 +38,7 @@ MainWindow::MainWindow(QWidget *parent)
     InitListSelectDevice();
     currentWidget = FlowTaskManagerptr;
 
-    // 创建 FlowTaskManager 实例
+    CAMERA->start();
     
 }
 
@@ -83,6 +83,17 @@ void MainWindow::on_actionPCB_triggered()
         pcbcomponentsdetect->close();
     });
     pcbcomponentsdetect->startrecog();
+}
+
+void MainWindow::on_actionautodetect_triggered()
+{
+    PreviewDialog* previewdialog = new PreviewDialog(this);
+    connect(previewdialog, &PreviewDialog::imageCaptured, 
+                this, &MainWindow::onImageCaptured);
+    
+    if (previewdialog->exec() == QDialog::Rejected) {
+        return;
+    }
 }
 
 void MainWindow::on_actiontaskmanage_triggered()
@@ -131,21 +142,55 @@ void MainWindow::InitListSelectDevice()
     }
 }
 
-void MainWindow::on_actionautodetect_triggered()
-{
-    if(current_device_id.isEmpty()){
-        QMessageBox::information(this, "提示", "请先选择设备");
-        return;
-    }
-    qDebug() << "current_device_id: " << current_device_id;
-}
-
 void MainWindow::yolomodel_init(){
     QThread* yolomodelthread;
     yolomodelthread = QThread::create([this](){
         yolomodel->recognize(cv::Mat(cv::Size(640, 640), CV_8UC3, cv::Scalar(0, 0, 0)));
     });
     yolomodelthread->start();
+}
+
+void MainWindow::onImageCaptured(const cv::Mat& image)
+{
+    try {
+        // 将图像保存为临时文件
+        std::string tempFile = "temp_capture.jpg";
+        cv::imwrite(tempFile, image);
+
+        // 进行图像匹配
+        std::vector<SiftMatcher::MatchResult> results = 
+            SIFT_MATCHER.matchImage(tempFile);
+
+        if (results.empty()) {
+            QMessageBox::warning(this, tr("警告"), 
+                tr("未找到匹配结果"));
+            return;
+        }
+
+        // 显示最佳匹配结果
+        QStringList imagePaths;
+        int count = 0;
+        for (const auto& result : results) {
+            if (count++ >= 5) break;  // 只显示前5个最佳匹配
+            imagePaths.append("IMAGE/" + QString::fromStdString(result.imagePath) + ".jpg");
+        }
+
+        if(imagePaths.size() > 0){
+            ImageFlowDialog *imageFlowDialog = new ImageFlowDialog(this);
+            imageFlowDialog->loadImages(imagePaths);
+             connect(imageFlowDialog, &ImageFlowDialog::imageSelected, this, [this](const QString& path) {
+                QString id = path.split("/").last().split(".").first();
+                gDeviceId.setDeviceId(id);
+            });
+            imageFlowDialog->exec();
+            imageFlowDialog->deleteLater();
+        }
+    }
+    catch(const std::exception& e)
+    {
+        QMessageBox::warning(this, tr("警告"), 
+            tr("匹配失败: ") + QString::fromStdString(e.what()));
+    }
 }
 
 void MainWindow::on_actiontest_triggered()

@@ -149,6 +149,8 @@ void Adddevice::GetImage_from_camera()
     labelediting->show();
 
     connect(labelediting.get(), &LabelEditingWindow::window_close, [this]() {
+        label_info_add.clear();
+        labelediting->labelEditing->getAllLabelItemInfo(label_info_add);
         SaveImage_from_camera();
     });
     

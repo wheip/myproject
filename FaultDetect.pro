@@ -45,7 +45,11 @@ SOURCES += \
     TaskManager/StepEditDialog.cpp \
     TaskManager/VisioView.cpp \
     TaskManager/WaveformManageDialog.cpp \
-    TaskManager/ConnectionLocationDialog.cpp
+    TaskManager/ConnectionLocationDialog.cpp \
+    PCB_Model_Identification/previewdialog.cpp \
+    PCB_Model_Identification/siftmatcher.cpp \
+    PCB_Model_Identification/ImageDialog/imageflowdialog.cpp \
+
 
 HEADERS += \
     FolderCheck.h \
@@ -83,7 +87,11 @@ HEADERS += \
     TaskManager/StepEditDialog.h \
     TaskManager/VisioView.h \
     TaskManager/WaveformManageDialog.h \
-    TaskManager/ConnectionLocationDialog.h
+    TaskManager/ConnectionLocationDialog.h \
+    PCB_Model_Identification/previewdialog.h \
+    PCB_Model_Identification/siftmatcher.h \
+    PCB_Model_Identification/ImageDialog/imagedialog.h \
+    PCB_Model_Identification/ImageDialog/imageflowdialog.h \
 
 
 FORMS += \
@@ -111,7 +119,8 @@ INCLUDEPATH += \
     $$PWD/PCB_Components_Detect \
     $$PWD/Detect_Devices \
     $$PWD/PCB_Model_Identification \
-    $$PWD/TaskManager
+    $$PWD/TaskManager \
+    $$PWD/PCB_Model_Identification/ImageDialog
 
 LIBS += -L"$$PWD/lib/windows/x64" -lRtNet \
         -L"$$PWD/lib/opencv_release" -lopencv_world4110 \

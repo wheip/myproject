@@ -105,7 +105,7 @@ void SearchDevice::showContextMenu(const QPoint &pos, int row, QTableWidgetItem 
     QMenu contextMenu(tr("上下文菜单"), parent);
     QAction actionDelete("删除图片", this);
     QAction actionReplace("添加/更换图片", this);
-    QAction actionSave("保存图片到本地", this);
+    QAction actionSave("另存为", this);
     
     connect(&actionDelete, &QAction::triggered, this, [this, row, itemImage]() {
         deleteImage(row, itemImage);

@@ -82,17 +82,7 @@ bool Database::delete_table(const QString& tableName)
 // 对 Device 表的增删改查函数
 bool Database::insert_device(const Device& device, QString& ErrorMessage)
 {
-    // 保存图片到文件系统
-    if (!device.image.isEmpty()) {
-        QString imagePath = "./IMAGE/" + device.id + ".jpg";
-        QFile file(imagePath);
-        if (!file.open(QIODevice::WriteOnly)) {
-            ErrorMessage = "无法创建图片文件: " + file.errorString();
-            return false;
-        }
-        file.write(device.image);
-        file.close();
-    }
+    QString imagePath;
 
     // 数据库中不存储图片路径
     query.prepare("INSERT INTO devices (id, device_name, device_driver_Voltage, device_driver_Current, device_driver_Power, image) VALUES (:id, :device_name, :device_driver_Voltage, :device_driver_Current, :device_driver_Power, :image)");
@@ -151,6 +141,30 @@ bool Database::insert_device(const Device& device, QString& ErrorMessage)
         return false;
     }
 
+    // 保存图片到文件系统
+    if (!device.image.isEmpty()) {
+        imagePath = "./IMAGE/" + device.id + ".jpg";
+        QFile file(imagePath);
+        if (!file.open(QIODevice::WriteOnly)) {
+            ErrorMessage = "无法创建图片文件: " + file.errorString();
+            return false;
+        }
+        file.write(device.image);
+        file.close();
+
+        try{
+            std::vector<std::string> imageFiles;
+            imageFiles.push_back(imagePath.toStdString());
+            SIFT_MATCHER.appendToDatabase(imageFiles);
+
+        }
+        catch(const std::exception& e)
+        {
+            ErrorMessage = "无法将图片添加到数据库: " + QString::fromStdString(e.what());
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -193,19 +207,6 @@ bool Database::get_device(const QString& condition, std::vector<Device>& devices
 
 bool Database::update_device(const Device& device, QString& ErrorMessage, bool includeImage)
 {
-    if(includeImage && !device.image.isEmpty())
-    {
-        // 保存新图片
-        QString imagePath = "./IMAGE/" + device.id + ".jpg";
-        QFile file(imagePath);
-        if (!file.open(QIODevice::WriteOnly)) {
-            ErrorMessage = "无法创建图片文件: " + file.errorString();
-            return false;
-        }
-        file.write(device.image);
-        file.close();
-    }
-
     // 数据库中不更新图片字段
     query.prepare("UPDATE devices SET device_name = :device_name, "
                  "device_driver_Voltage = :device_driver_Voltage, "
@@ -223,16 +224,39 @@ bool Database::update_device(const Device& device, QString& ErrorMessage, bool i
         ErrorMessage = query.lastError().text();
         return false;
     }
+
+    if(includeImage && !device.image.isEmpty())
+    {
+        // 保存新图片
+        QString imagePath = "./IMAGE/" + device.id + ".jpg";
+        QFile file(imagePath);
+        if (!file.open(QIODevice::WriteOnly)) {
+            ErrorMessage = "无法创建图片文件: " + file.errorString();
+            return false;
+        }
+        file.write(device.image);
+        file.close();
+
+        try{
+            if(SIFT_MATCHER.removeFromDatabase(std::string(device.id.toStdString())))
+            {
+                std::vector<std::string> imageFiles;
+                imageFiles.push_back(imagePath.toStdString());
+                SIFT_MATCHER.appendToDatabase(imageFiles);
+            }
+        }
+        catch(const std::exception& e)
+        {
+            ErrorMessage = "无法将图片添加到SIFT数据库: " + QString::fromStdString(e.what());
+            return false;
+        }
+    }
+
     return true;
 }
 
 bool Database::delete_device(const QString& id, QString& ErrorMessage)
 {
-    // 删除图片文件
-    QString imagePath = "./IMAGE/" + id + ".jpg";
-    if (QFile::exists(imagePath)) {
-        QFile::remove(imagePath);
-    }
 
     query.exec("SET FOREIGN_KEY_CHECKS = 0;");
     query.prepare("DELETE FROM devices WHERE id = :id");
@@ -261,6 +285,16 @@ bool Database::delete_device(const QString& id, QString& ErrorMessage)
         }
     }
     query.exec("SET FOREIGN_KEY_CHECKS = 1;");
+
+    // 删除图片文件
+    QString imagePath = "./IMAGE/" + id + ".jpg";
+    if (QFile::exists(imagePath)) {
+        QFile::remove(imagePath);
+        if(!SIFT_MATCHER.removeFromDatabase(std::string(id.toStdString())))
+        {
+            ErrorMessage = "无法删除SIFT数据库中的图片: " + id;
+        }
+    }
     return true;
 }
 
