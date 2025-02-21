@@ -26,6 +26,10 @@ public:
 
     std::vector<Label> get_labels();
 
+    const std::vector<std::string>& get_class_names() const { return class_name; }
+    const std::vector<cv::Scalar>& get_colors() const { return color; }
+    const std::vector<int>& get_class_display() const { return class_display; }
+
 private:
     void loadModel();
     std::unique_ptr<Ort::Env> env;

@@ -80,7 +80,7 @@ void YOLOModel::draw_box(cv::Mat& img, const std::vector<std::vector<float>>& in
         oss << info[i][4];
         label += oss.str();
         int font_scale = std::max(1, static_cast<int>(std::min(w, h) / 1500)); // 增加字体大小以提高可读性
-        cv::putText(img, label, cv::Point(info[i][0] * w / 640.0, info[i][1] * h / 640.0), cv::FONT_HERSHEY_SIMPLEX, font_scale, color[info[i][5]], line_thickness);
+        cv::putText(img, label, cv::Point(info[i][0] * w / 640.0, info[i][1] * h / 640.0 - 20), cv::FONT_HERSHEY_SIMPLEX, font_scale, color[info[i][5]], line_thickness);
     }
 }
 

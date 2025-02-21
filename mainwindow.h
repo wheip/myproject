@@ -18,7 +18,7 @@
 #include "yolomodel.h"
 #include "FolderCheck.h"
 #include "pxie8902.h"
-#include "searchdevice.h"
+#include "devicemanager.h"
 #include "labelediting.h"
 #include "deviceid.h"
 #include <iostream>
@@ -63,6 +63,7 @@ private:
     // std::shared_ptr<AddTask> addtask;
     std::shared_ptr<ManageTask> manageTask;
     std::shared_ptr<FlowTaskManager> FlowTaskManagerptr;
+    std::shared_ptr<DeviceManager> deviceManager;
 
     std::shared_ptr<PXIe5320> pxi5322;
     std::shared_ptr<PXIe5320> pxi5323;
@@ -82,7 +83,6 @@ private:
     std::unique_ptr<LabelEditing> labelediting;
     std::shared_ptr<DetectCamera> detectcamera;
     std::shared_ptr<IRImageDisplay> irimagedisplay;
-    std::shared_ptr<SearchDevice> manageDevice;
     void switchWidget(std::shared_ptr<QWidget> newWidget);
 
     void yolomodel_init();

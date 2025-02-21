@@ -25,7 +25,7 @@ MainWindow::MainWindow(QWidget *parent)
     manageTask = std::make_shared<ManageTask>(this);
     // addtask = std::make_shared<AddTask>(this);
     FlowTaskManagerptr = std::make_shared<FlowTaskManager>(this);
-    manageDevice = std::make_shared<SearchDevice>(this);
+    deviceManager = std::make_shared<DeviceManager>(this);
     ui->setupUi(this);
     ui->statusbar->showMessage("Ready");
     manageTask->close();
@@ -114,7 +114,7 @@ void MainWindow::on_actiondevicemanage_triggered()
     if(currentWidget){
         currentWidget->hide();
     }
-    switchWidget(manageDevice);
+    switchWidget(deviceManager);
 }
 
 void MainWindow::InitListSelectDevice()

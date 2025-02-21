@@ -20,6 +20,8 @@ SOURCES += \
     PCB_Components_Detect/labelrectitem.cpp \
     PCB_Components_Detect/pcbcomponentsdetect.cpp \
     PCB_Components_Detect/yolomodel.cpp \
+    PCB_Components_Detect/labelimageviewdialog.cpp \
+    PCB_Components_Detect/labelmanagerdialog.cpp \
     TestTask/datamanager.cpp \
     TestTask/executetask.cpp \
     TestTask/managetask.cpp \
@@ -37,8 +39,8 @@ SOURCES += \
     PXIe5320/pxie5320.cpp \
     mysql/database.cpp \
     pxie8902/pxie8902.cpp \
-    Detect_Devices/adddevice.cpp \
-    Detect_Devices/searchdevice.cpp \
+    Detect_Devices/createdevicedialog.cpp \
+    Detect_Devices/devicemanager.cpp \
     TaskManager/FlowTaskManager.cpp \
     TaskManager/FlowNode.cpp \
     TaskManager/AcquisitionManageDialog.cpp \
@@ -60,6 +62,8 @@ HEADERS += \
     PCB_Components_Detect/labelrectitem.h \
     PCB_Components_Detect/pcbcomponentsdetect.h \
     PCB_Components_Detect/yolomodel.h \
+    PCB_Components_Detect/labelimageviewdialog.h \
+    PCB_Components_Detect/labelmanagerdialog.h \
     TestTask/ThreadPool.hpp \
     TestTask/datamanager.h \
     TestTask/executetask.h \
@@ -78,8 +82,8 @@ HEADERS += \
     PXIe5320/pxie5320.h \
     mysql/database.h \
     pxie8902/pxie8902.h \
-    Detect_Devices/adddevice.h \
-    Detect_Devices/searchdevice.h \
+    Detect_Devices/createdevicedialog.h \
+    Detect_Devices/devicemanager.h \
     deviceid.h \
     TaskManager/FlowTaskManager.h \
     TaskManager/FlowNode.h \
@@ -104,8 +108,8 @@ FORMS += \
     mainwindow.ui \
     PXIe5711/PXIe5711.ui \
  \#    PXIe5320/PXIe5320.ui 
-    Detect_Devices/adddevice.ui \
-    Detect_Devices/searchdevice.ui
+    Detect_Devices/createdevicedialog.ui \
+    Detect_Devices/devicemanager.ui
 
 INCLUDEPATH += \
     $$PWD/camera \

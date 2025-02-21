@@ -44,6 +44,7 @@ ManageTask::ManageTask(QMainWindow *parent)
     });
     QObject::connect(&infraredcamera, &Camera::Image_ir_hypertherm, this, &ManageTask::saveinfraredframe_hypertherm);
     QObject::connect(&gDeviceId, &DeviceId::deviceChanged, this, [this]() {
+        device_id = gDeviceId.getDeviceId();
         on_pbrefresh_clicked();
     });
     on_pbrefresh_clicked();

@@ -10,7 +10,7 @@
 #include <QHBoxLayout>
 #include "StepEditDialog.h"
 #include "deviceid.h"
-
+#include <QRegExp>
 
 FlowTaskManager::FlowTaskManager(QWidget *parent)
     : QWidget(parent)
@@ -209,11 +209,25 @@ void FlowTaskManager::createNewTask()
     }
 
     QString taskId = taskIdEdit->text();
+
+    if(taskId.length() > 20)
+    {
+        QMessageBox::warning(this, "错误", "任务ID长度不能超过20个字符");
+        return;
+    }
+
+    QRegExp rx("[a-zA-Z0-9_]+");
+    if(!rx.exactMatch(taskId) || taskId.startsWith("test"))
+    {
+        QMessageBox::warning(this, "错误", "任务ID只能由数字、字母和下划线组成,且不能以test开头");
+        return;
+    }
+
     if (taskId.isEmpty()) {
         taskId = generateTaskId();
         taskIdEdit->setText(taskId);
     }
-    
+
     // 检查任务ID是否已存在
     std::vector<TestTask> existingTasks;
     QString errorMsg;
