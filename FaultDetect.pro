@@ -29,7 +29,6 @@ SOURCES += \
     TestTask/uestcqcustomplot.cpp \
     camera/detectcamera.cpp \
     InfraredCamera/camera.cpp \
-    TestTask/addtask.cpp \
     include/qcustomplot.cpp \
     imageviewer.cpp \
     led.cpp \
@@ -72,7 +71,6 @@ HEADERS += \
     TestTask/uestcqcustomplot.h \
     camera/detectcamera.h \
     InfraredCamera/camera.h \
-    TestTask/addtask.h \
     include/qcustomplot.h \
     imageviewer.h \
     led.h \
@@ -103,7 +101,6 @@ FORMS += \
     TestTask/managetask.ui \
     TestTask/taskconnectwire.ui \
     camera/detectcamera.ui \
-    TestTask/addtask.ui \
     InfraredCamera/camera.ui \
     mainwindow.ui \
     PXIe5711/PXIe5711.ui \

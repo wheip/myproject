@@ -102,7 +102,7 @@ DataManager::DataBlock DataManager::loadDataInRange(double minX, double maxX)
     //     skipFactor = 1 << static_cast<int>(std::log2(skipFactor));
     // }
 
-    // 预分配空间 - 使用更准确的预估
+    // 预分配空间
     int estimatedPoints = (pointsInRange / skipFactor) * 2;  // *2 是为了最坏情况
     result.x.reserve(estimatedPoints);
     result.y.reserve(estimatedPoints);

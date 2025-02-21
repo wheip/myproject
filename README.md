@@ -9,7 +9,7 @@ FaultDetect 是一套基于 Qt 的故障检测系统，集成了图像处理、�
 
 ## 系统需求
 - 操作系统：Windows 64 位（其他平台亦可，但部分硬件相关模块可能需要适配）
-- 编译器：支持 C++17 的编译器（如 MSVC、MinGW 等）
+- 编译器：支持 C++17 的编译器（MSVC）
 - Qt 版本：推荐 Qt 5.x 或 Qt 6.x
 - OpenCV：版本与项目配置相符（例如 OpenCV 4.1.1 或兼容版本）
 - 数据库：MySQL 数据库（需安装相应的数据库驱动，例如 QMYSQL）
@@ -18,7 +18,7 @@ FaultDetect 是一套基于 Qt 的故障检测系统，集成了图像处理、�
 ## 依赖库
 - **Qt 模块**：core, gui, widgets, sql, charts, concurrent, printsupport, serialport 等。
 - **OpenCV**：用于图像处理、特征检测与匹配，支持 CUDA 加速（如果设备支持）。
-- **ONNXRuntime**：用于深度学习模型推理（例如 YOLO 模型）。
+- **ONNXRuntime**：用于深度学习模型推理（YOLO 模型）。
 - **设备驱动库**：PXIe 系列驱动库以及其他硬件相关库。
 - **MySQL**：用于设备与任务信息的存储。
 
@@ -58,7 +58,7 @@ FaultDetect 是一套基于 Qt 的故障检测系统，集成了图像处理、�
   涉及任务管理、流程组织等功能模块，包括 `FlowTaskManager`、`StepEditDialog`、`executetask` 等。
 
 - **Detect_Devices/**  
-  实现设备搜索、添加与修改等功能（例如 `adddevice.*`、`searchdevice.*`）。
+  实现设备搜索、添加与修改等功能（例如 `createdevicedialog.*`、`devicemanager.*`）。
 
 - **Camera/** 与 **InfraredCamera/**  
   提供摄像头及红外摄像头的视频采集与图像处理支持。
