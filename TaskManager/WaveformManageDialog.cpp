@@ -144,8 +144,17 @@ void WaveformManageDialog::setupTable()
 
 void WaveformManageDialog::updateTableRow(int row, const PXIe5711Waveform& waveform)
 {
-    // 通道号列
-    QTableWidgetItem *channelNumItem = new QTableWidgetItem(QString::number(waveform.channel));
+    // 通道号列 - 根据不同范围显示不同的编号
+    QString channelDisplay;
+    if (waveform.channel >= 0 && waveform.channel <= 15) {
+        channelDisplay = QString::number(waveform.channel);  // 模拟量输出 0-15
+    } else if (waveform.channel >= 16 && waveform.channel <= 27) {
+        channelDisplay = QString::number(waveform.channel - 16);  // 数字量输出 0-11
+    } else if (waveform.channel >= 28 && waveform.channel <= 31) {
+        channelDisplay = QString::number(waveform.channel - 28);  // 电源输出 0-3
+    }
+    
+    QTableWidgetItem *channelNumItem = new QTableWidgetItem(channelDisplay);
     channelNumItem->setFlags(channelNumItem->flags() & ~Qt::ItemIsEditable);
     tableWidget->setItem(row, 0, channelNumItem);
 
@@ -276,23 +285,23 @@ void WaveformManageDialog::onItemChanged(QTableWidgetItem *item)
     switch (item->column()) {
         case 3: // amplitude
             waveform.amplitude = item->text().toDouble(&ok);
-            if (!ok) {
-                QMessageBox::warning(this, "错误", "幅值必须是数值");
-                item->setText(QString::number(waveform.amplitude));
+            if (!ok || waveform.amplitude < 0 || waveform.amplitude > 10) {
+                QMessageBox::warning(this, "错误", "幅值必须是大于或等于0小于或等于10的数值");
+                item->setText(QString::number(0));
             }
             break;
         case 4: // frequency
             waveform.frequency = item->text().toDouble(&ok);
-            if (!ok) {
-                QMessageBox::warning(this, "错误", "频率必须是数值");
-                item->setText(QString::number(waveform.frequency));
+            if (!ok || waveform.frequency < 0 || waveform.frequency > 1000000) {
+                QMessageBox::warning(this, "错误", "频率必须是大于或等于0小于或等于1000000的数值");
+                item->setText(QString::number(0));
             }
             break;
         case 5: // dutyCycle
             waveform.dutyCycle = item->text().toDouble(&ok);
-            if (!ok) {
-                QMessageBox::warning(this, "错误", "占空比必须是数值");
-                item->setText(QString::number(waveform.dutyCycle));
+            if (!ok || waveform.dutyCycle < 0 || waveform.dutyCycle > 100) {
+                QMessageBox::warning(this, "错误", "占空比必须是大于或等于0小于或等于100的数值");
+                item->setText(QString::number(0));
             }
             break;
         case 6: // positive_connect_location
