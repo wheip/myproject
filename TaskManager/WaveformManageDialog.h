@@ -20,7 +20,7 @@ signals:
     void waveformsUpdated(const QList<PXIe5711Waveform>& waveforms);
 
 public:
-    explicit WaveformManageDialog(const QString& stepId, const QString& deviceId, QWidget *parent = nullptr);
+    explicit WaveformManageDialog(const int& stepId, const int& deviceId, QWidget *parent = nullptr);
     QList<PXIe5711Waveform> waveforms() const { return m_waveforms; }
     void setWaveforms(const QList<PXIe5711Waveform>& waveforms) {
         m_waveforms = waveforms;
@@ -51,8 +51,8 @@ private:
     QPushButton *addButton;
     QPushButton *deleteButton;
     QComboBox *channelComboBox;
-    QString m_deviceId;  // 存储设备ID
-    QString m_stepId;
+    int m_deviceId;  // 存储设备ID
+    int m_stepId;
     QList<PXIe5711Waveform> m_waveforms;
     static const QList<int> AVAILABLE_CHANNELS;
 

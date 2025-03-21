@@ -20,7 +20,7 @@ signals:
     void stepDataChanged(const Step& step);  // 添加信号声明
 
 public:
-    explicit StepEditDialog(const Step &step, const QString& deviceId, QWidget *parent = nullptr);
+    explicit StepEditDialog(const Step &step, const int& deviceId, QWidget *parent = nullptr);
     // 返回编辑后的步骤数据
     Step step() const;
 
@@ -31,7 +31,7 @@ private slots:
     void accept() override;
 
 private:
-    QString m_deviceId;  // 存储设备ID
+    int m_deviceId;  // 存储设备ID
     void setupUI();
     void setupTable();
 

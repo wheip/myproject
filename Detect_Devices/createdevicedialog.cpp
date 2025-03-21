@@ -60,7 +60,7 @@ void CreateDeviceDialog::onSelectImage()
 
 void CreateDeviceDialog::LabelEditing()
 {
-    LabelManagerDialog dlg(this, selectedImage, ui->lineEdit_id->text(), deviceLabels);
+    LabelManagerDialog dlg(this, selectedImage, -1, deviceLabels);
     if(dlg.exec() == QDialog::Accepted)
     {
         deviceLabels = dlg.getLabels();
@@ -84,7 +84,7 @@ void CreateDeviceDialog::onCaptureImage()
 Device CreateDeviceDialog::getDevice() const
 {
     Device device;  // 创建一个新的Device对象
-    device.id = ui->lineEdit_id->text();
+    device.id = -1;
     device.device_name = ui->lineEdit_name->text().toUtf8();
     device.device_driver_Voltage = 0;
     device.device_driver_Current = 0;

@@ -24,10 +24,29 @@ PXIe5320::PXIe5320(QObject *parent, int cardID)
         pRangeLow[i] = lowRange;
         pBandWidth[i] = static_cast<JY5320_AI_BandWidth>(BandWidth);
     }
+    
+    // 初始状态为关闭
+    updateStatus(PXIe5320Status::Closed);
 }
 
 PXIe5320::~PXIe5320() {
-    std::lock_guard<std::mutex> lock(mtx);
+    {
+        std::lock_guard<std::mutex> lock(mtx);
+        shouldExit = true;
+        cv.notify_all();
+    }
+    
+    if(fetchThread) {
+        if(QThread::currentThread() != fetchThread) {
+            fetchThread->quit();
+            fetchThread->wait();
+            delete fetchThread;
+        } else {
+            fetchThread->disconnect();
+        }
+        fetchThread = nullptr;
+    }
+    
     if(pDataBuf)
     {
         delete[] pDataBuf;
@@ -54,8 +73,22 @@ PXIe5320::~PXIe5320() {
         }
         hDevice = nullptr;
         isStarted = false;
+        updateStatus(PXIe5320Status::Closed);
         qDebug() << "PXIe5320::~PXIe5320()";
     }
+}
+
+bool PXIe5320::SelfTest() {
+    {std::lock_guard<std::mutex> lock(mtx);
+    if(m_status != PXIe5320Status::Closed) return true;}
+    if(JY5320_Open(slotNumber, &hDevice) != 0)
+    {
+        errorMsg = "cardID:" + QString::number(cardID) + "_JY5320_Open: Open device failed!";
+        return false;
+    }
+    JY5320_AI_Stop(hDevice);
+    JY5320_Close(hDevice);
+    return true;
 }
 
 bool PXIe5320::InitDevice(QString& errorMsg) {
@@ -106,56 +139,99 @@ bool PXIe5320::InitDevice(QString& errorMsg) {
 }
 
 bool PXIe5320::StartAcquisition(std::vector<PXIe5320Waveform> collectdata, double collecttime) {
+    // 如果设备正在运行，先关闭
+    if (m_status != PXIe5320Status::Closed) {
+        DeviceClose();
+    }
+    
     this->TotalSamplesToAcq = static_cast<int>(SampleRate * collecttime);
-    qDebug() << "采集点数" << TotalSamplesToAcq;
     this->SamplesToAcq = (SampleRate * collecttime) > SampleRate ? SampleRate : (SampleRate * collecttime);
-
+    
     for(int c = 0; c < channelCount; c++)
     {
         AcqData[c].clear();
     }
     serial_number = 0;
+    
     if(!InitDevice(errorMsg)){
-        qDebug() << errorMsg;
-        emit StateChanged(errorMsg, -1);
         handleError();
-        emit CompleteAcquisition();
         return false;
     }
-
+    
     this->collectdata = std::move(collectdata);
-
+    
+    // 更新状态为准备
+    updateStatus(PXIe5320Status::Ready);
+    emit StateChanged("设备已准备好", 0);
     emit DeviceReady();
+    
+    return true;
 }
 
-void PXIe5320::SendSoftTrigger()
+bool PXIe5320::SendSoftTrigger()
 {
-    if(isStarted) return;
-    QThread* fetchThread = QThread::create([this]() {
-        while (isStarted) {
-            this->FetchData();
-            QThread::msleep(10); // 相当于10ms的定时器间隔
-        }
-    });
+    // 只有在准备状态才能触发
+    if (m_status != PXIe5320Status::Ready) {
+        errorMsg = "cardID:" + QString::number(cardID) + " 设备未准备好，无法触发";
+        // emit StateChanged(errorMsg, -1);
+        return false;
+    }
     
-    connect(fetchThread, &QThread::finished, fetchThread, &QObject::deleteLater);
-    fetchThread->start();
-
-    this->isStarted = true;
+    {
+        std::lock_guard<std::mutex> lock(mtx);
+        isStarted = true;
+        paused = false;  // 恢复运行
+    }
+    
+    // 如果线程已存在，则直接唤醒；否则创建新线程
+    if (fetchThread == nullptr) {
+        fetchThread = new QThread();
+        QObject* worker = new QObject();
+        worker->moveToThread(fetchThread);
+        connect(fetchThread, &QThread::started, worker, [this, worker]() {
+            while (true) {
+                std::unique_lock<std::mutex> lock(mtx);
+                // 等待直到不处于暂停状态或需要退出
+                cv.wait(lock, [this](){ return !paused || shouldExit; });
+                if (shouldExit)
+                    break;
+                lock.unlock();
+                this->FetchData();
+                QThread::msleep(1);
+            }
+            QMetaObject::invokeMethod(worker, "deleteLater", Qt::QueuedConnection);
+        });
+        fetchThread->start();
+    } else {
+        // 线程已经存在，则清除暂停标志并通知继续执行
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            paused = false;
+        }
+        cv.notify_all();
+    }
+    
+    // 发送软件触发
     if(JY5320_AI_SendSoftTrigger(hDevice, JY5320_TriggerMode::JY5320_StartTrigger)!= 0)
     {
         errorMsg = "cardID:" + QString::number(cardID) + "_JY5320_AI_SendSoftTrigger: failed!";
         qDebug() << errorMsg;
-        emit StateChanged(errorMsg, -1);
         handleError();
-        return;
+        return false;
     }
-    return;
+    
+    updateStatus(PXIe5320Status::Running);
+    emit StateChanged("设备正在运行", 1);
+    return true;
 }
 
 void PXIe5320::DeviceClose()
 {
-    if(!isStarted) return;
+    std::lock_guard<std::mutex> lock(mtx);
+    if(!isStarted && m_status == PXIe5320Status::Closed) return;
+    paused = true;
+    isStarted = false;
+    
     if(hDevice)
     {
         if(JY5320_SetDeviceStatusLed(hDevice, false, 0) != 0)
@@ -176,12 +252,20 @@ void PXIe5320::DeviceClose()
         hDevice = nullptr;
         qDebug() << "cardID:" << cardID << "Close";
     }
-    this->isStarted = false;
+    
+    // 更新状态为关闭
+    updateStatus(PXIe5320Status::Closed);
+    emit StateChanged("设备已关闭", 0);
 }
 
 void PXIe5320::FetchData()
 {
     if(!isStarted) return;
+    
+    {
+        std::lock_guard<std::mutex> lock(mtx);
+        if(shouldExit) return;
+    }
 
     unsigned long long availableSamples = 0;
     unsigned int actualSample = 0;
@@ -230,15 +314,22 @@ void PXIe5320::FetchData()
 
     if(SampleRemain > 0)
     {
-        qDebug() << "总采集点" << TotalSamplesToAcq << "已采集" << transferedSamples;
         return;
     }
 
     emit signalAcquisitionData(collectdata, serial_number);
 
-    DeviceClose();
+    if(continueAcquisition) {
+        TotalSamplesToAcq += SampleRate;
+        for(auto &collec : collectdata)
+        {
+            collec.data.clear();
+        }
+        return;
+    }
+    
+    QMetaObject::invokeMethod(this, "DeviceClose", Qt::QueuedConnection);
     emit CompleteAcquisition();
-    qDebug() << "cardID:" << cardID << "CompleteAcquisition";
 
     delete[] pDataBuf;
     pDataBuf = nullptr;
@@ -246,6 +337,7 @@ void PXIe5320::FetchData()
 
 void PXIe5320::handleError()
 {
+    emit StateChanged(errorMsg, -1);
     if(pDataBuf)
     {
         delete[] pDataBuf;
@@ -254,13 +346,34 @@ void PXIe5320::handleError()
     SamplesToAcq = 0;
     availableSamples = 0;
     transferedSamples = 0;
-
-    QMetaObject::invokeMethod(this, [this]() {
-        qDebug() << errorMsg;
-    }, Qt::QueuedConnection);
+    
+    // 发生错误时更新状态为关闭
+    updateStatus(PXIe5320Status::Closed);
 }
 
 void PXIe5320::InterruptAcquisition()
 {
-    TotalSamplesToAcq = 0;
+    // 线程安全地设置退出标志
+    std::lock_guard<std::mutex> lock(mtx);
+    shouldExit = true;
+}
+
+void PXIe5320::updateStatus(PXIe5320Status status)
+{
+    if (m_status != status) {
+        m_status = status;
+        
+        // 根据状态发送不同的信号
+        switch (status) {
+            case PXIe5320Status::Closed:
+                emit StateChanged("设备已关闭", 0);
+                break;
+            case PXIe5320Status::Ready:
+                emit StateChanged("设备已准备", 1);
+                break;
+            case PXIe5320Status::Running:
+                emit StateChanged("设备运行中", 2);
+                break;
+        }
+    }
 }

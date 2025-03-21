@@ -2,12 +2,13 @@
 #include "ui_taskconnectwire.h"
 #include <QtConcurrent>
 
-TaskConnectWire::TaskConnectWire(QWidget *parent, QStackedWidget *stackedWidget)
-    : QWidget(parent)
+TaskConnectWire::TaskConnectWire(QWidget *parent)
+    : QDialog(parent)
     , ui(new Ui::TaskConnectWire)
 {
     ui->setupUi(this);
-    this->stackedWidget = stackedWidget;
+    setWindowTitle("连接线配置");
+    setModal(true);
     ui->pbbegin->setEnabled(false);
     ui->pbcomplete->setEnabled(false);
 }
@@ -17,13 +18,13 @@ TaskConnectWire::~TaskConnectWire()
     delete ui;
 }
 
-void TaskConnectWire::setStep(const QString step_id)
+void TaskConnectWire::setStep(const int step_id)
 {
     this->step_id = step_id;
     ui->pbbegin->setEnabled(true);
 }
 
-void TaskConnectWire::setDevice(const QString device_id)
+void TaskConnectWire::setDevice(const int device_id)
 {
     this->device_id = device_id;
     initimage();
@@ -44,7 +45,7 @@ void TaskConnectWire::initimage()
             return QString("数据库连接失败");
         }
         std::vector<Device> devices;
-        QString condition = "id = '" + device_id + "'";
+        QString condition = "id = '" + QString::number(device_id) + "'";
         threadDb.get_device(condition, devices, true);
         if(devices.empty()) {
             return QString("设备查询失败");
@@ -82,12 +83,12 @@ void TaskConnectWire::initWaveform()
             qDebug() << "线程数据库连接失败";
             return false;
         }
-        QString tableName = device_id + "$$PXIe5320";
-        QString condition = "step_id = '" + step_id + "'";
+        QString tableName = QString::number(device_id) + "$$PXIe5320";
+        QString condition = "step_id = '" + QString::number(step_id) + "'";
         threadDb.get_pxie5320waveform(tableName, condition, pxie5320waveforms);
-        tableName = device_id + "$$PXIe5711";
+        tableName = QString::number(device_id) + "$$PXIe5711";
         threadDb.get_pxie5711waveform(tableName, condition, pxie5711waveforms);
-        tableName = device_id + "$$PXIe8902";
+        tableName = QString::number(device_id) + "$$PXIe8902";
         threadDb.get_8902data(tableName, condition, data8902s);
         threadDb.disconnect();
         return true;
@@ -222,7 +223,8 @@ void TaskConnectWire::beginwireconnect()
     
     connect(watcher, &QFutureWatcher<void>::finished, this, [this, watcher]() {
         QMetaObject::invokeMethod(this, [this]() {
-            stackedWidget->setCurrentIndex(1);
+            // 如果需要可以设置对话框标题和模态属性
+            accept();
         }, Qt::QueuedConnection);
         watcher->deleteLater();
     });

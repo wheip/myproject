@@ -1,267 +1,134 @@
 #ifndef EXECUTETASK_H
 #define EXECUTETASK_H
+
+#include <QObject>
+#include <QTimer>
+#include <QVector>
+#include <QMap>
+#include <functional>
+#include "jydevicemanager.h"
 #include "ClassList.h"
-#include <vector>
-#include "database.h"
-#include "pxie5711.h"
-#include "pxie5320.h"
-#include "pxie8902.h"
-#include <iostream>
-#include <QThread>
-#include <QMutex>
-#include <QWaitCondition>
-#include <thread>
-#include <queue>
-#include <condition_variable>
-#include <QTextCodec>
-#include <QStringConverter>
-
-using namespace std;
+#include "savedata.h"
 
 
-class TaskManager {
-public:
-    TaskManager(int threadnums, const QString& TableName) : threadnums(threadnums), TableName(TableName) {
-        device_id = TableName.split("$$")[0];
-        task_id = TableName.split("$$")[1];
-        time = TableName.split("$$")[2];
-        for(int i = 0; i < threadnums; i++) {
-            workers.emplace_back([this]() { 
-                try
-                {
-                    worker();
-                }
-                catch(const std::exception& e)
-                {
-                    qDebug() << e.what();
-                }
-            });
-        }
-    };
-    ~TaskManager() {
-        qDebug() << "TaskManager Destructor";
-        stopWorkers();
-        qDebug() << "TaskManager Finished";
-    }
+// 任务状态枚举
+enum class TaskStatus {
+    Idle,       // 空闲
+    Ready,      // 准备
+    Running,    // 运行中
+    Completed,  // 已完成
+    Error       // 错误
+};
 
-    void addTask(const std::vector<PXIe5320Waveform>& data, int serial_number) {
-        std::lock_guard<std::mutex> lock(mtx);
-        for(const auto& waveform : data) {
-            taskQueue.push(waveform);
-            Taskcv.notify_one(); // 通知一个等待的线程
-        }
-    }
+// 设备类型枚举
+enum class DeviceType {
+    PXIe5711,
+    PXIe8902,
+    PXIe5322,
+    PXIe5323,
+    None
+};
 
-    bool getTask(PXIe5320Waveform& data) {
-        std::lock_guard<std::mutex> lock(mtx);
-        if (taskQueue.empty()) {
-            return false;
-        }
-        data = taskQueue.front();
-        taskQueue.pop();
-        return true;
-    }
-
-    void waitForTask() {
-        std::unique_lock<std::mutex> lock(mtx);
-        Taskcv.wait(lock, [this] { return !taskQueue.empty() || stop; });
-    }
-
-    bool isFinished(bool taskCompleted) {
-        std::lock_guard<std::mutex> lock(mtx);
-        if(taskCompleted && taskQueue.empty())
-        {
-            stop = true;
-            Taskcv.notify_all();
-            return true;
-        }
-        return false;
-    }
-
-    bool isStop() {
-        std::lock_guard<std::mutex> lock(mtx);
-        return stop && taskQueue.empty();
-    }
-
-private:
-    void worker() {
-        while (true) {
-            PXIe5320Waveform task;
-            waitForTask(); // 等待任务
-            if (isStop()) {
-                qDebug() << "线程结束";
-                break;
-            }
-            if (getTask(task)) {
-                // 执行任务
-                qDebug() << "执行任务";
-                processTask(task);
-            }
-        }
-    }
-
-    void processTask(const PXIe5320Waveform& data) {
-        // 创建保存路径
-        QString FolderPath = "./CollectData/" + device_id + "/" + task_id + "/" + time + "/" + QString::number(data.device);
-        if(!QDir(FolderPath).exists()) {
-            QDir().mkpath(FolderPath);
-        }
-        QString FilePath = FolderPath + "/" + data.id + ".mmap";
-        
-        QFile file(FilePath);
-        if(!file.open(QIODevice::WriteOnly | QIODevice::ReadWrite)) {  // 需要读写权限
-            throw std::runtime_error("Failed to open files for writing.");
-        }
-        
-        // 计算数据大小（字节数）
-        qint64 dataSize = data.data.size() * sizeof(float);
-        
-        // 设置文件大小
-        if (!file.resize(dataSize)) {
-            file.close();
-            throw std::runtime_error("Failed to resize file.");
-        }
-        
-        // 创建内存映射
-        uchar* mappedMemory = file.map(0, dataSize);
-        if (!mappedMemory) {
-            file.close();
-            throw std::runtime_error("Failed to create memory mapping.");
-        }
-        
-        try {
-            // 复制数据到映射内存
-            memcpy(mappedMemory, data.data.data(), dataSize);
-            
-            // 确保数据写入到磁盘
-            if (!file.flush()) {
-                throw std::runtime_error("Failed to flush data to disk.");
-            }
-        }
-        catch (const std::exception& e) {
-            // 确保清理资源
-            file.unmap(mappedMemory);
-            file.close();
-            throw;
-        }
-        
-        // 解除映射
-        if (!file.unmap(mappedMemory)) {
-            file.close();
-            throw std::runtime_error("Failed to unmap memory.");
-        }
-        
-        file.close();
-    }
-
-    void stopWorkers() {
-        {std::lock_guard<std::mutex> lock(mtx);
-        stop = true;
-        Taskcv.notify_all();}
-        for (auto &worker : workers) {
-            if(worker.joinable())
-            {
-                worker.join();
-            }
-        }
-    }
-
-    std::queue<PXIe5320Waveform> taskQueue;
-    std::vector<std::thread> workers;
-    std::mutex mtx;
-    std::condition_variable Taskcv;
-    int threadnums;
-    QString TableName;
-    QString device_id;
-    QString task_id;
-    QString time;
-    bool stop = false;
+// 任务配置结构体
+struct TaskConfig {
+    DeviceType deviceType;
+    double collectTime;
+    bool enabled = false;
+    std::variant<std::vector<PXIe5711Waveform>, std::vector<Data8902>, std::vector<PXIe5320Waveform>> parameters;
 };
 
 class ExecuteTask : public QObject
 {
     Q_OBJECT
 public:
-    ExecuteTask(const QString taskid = "", const QString TableName = "", bool single_step = false, Step step_signal = Step());
+    explicit ExecuteTask(QObject *parent = nullptr);
     ~ExecuteTask();
 
-    void StartTask();
+    // 配置任务
+    void configureTask(const QVector<TaskConfig>& configs);
 
-    void InterruptTask();
+    // 获取当前任务状态
+    TaskStatus getTaskStatus() const { return m_taskStatus; }
 
-    void ContinueTask();
-
-public slots:
-    void SlotAcquisitionData_5322(const std::vector<PXIe5320Waveform> collectdata, int serial_number);
-
-    void SlotAcquisitionData_5323(const std::vector<PXIe5320Waveform> collectdata, int serial_number);
-
-    void SlotAcquisitionData_8902(const std::vector<PXIe5320Waveform> collectdata, int serial_number);
-
-    void device_StateChanged(const QString& state, int numb);
+    // 获取错误信息
+    QString getErrorMessage() const { return m_errorMessage; }
 
 signals:
+    // 任务状态变化信号
+    void taskStatusChanged(TaskStatus status, const QString& message);
 
-    void StateChanged(QString state, int stepNumber);
+    // 任务错误信号
+    void taskError(const QString& errorMessage);
 
-    void GetInfraredImage(Step step);
+    // 数据更新信号
+    void dataUpdated(DeviceType deviceType, const QVariant& data);
 
-    void TaskFinished();
+    // 任务完成信号
+    void taskCompleted();
+
+public slots:
+    // 启动所有任务
+    bool startAllTasks();
+
+    // 触发所有任务
+    bool triggerAllTasks();
+
+    // 停止所有任务
+    void stopAllTasks();
+
+    // 设备数据接收槽
+    void onDeviceDataReceived(const std::vector<PXIe5320Waveform>& data, int serialNumber);
+
+    // 设备状态变化槽
+    void onDeviceStateChanged(const QString& state, int code);
+
+    // 保存数据槽
+    void SetsaveData(int ThreadNum, const QString& TableName, bool saveData);
 
 private:
-    std::condition_variable cv;
-    std::condition_variable cv_5711;
-    bool paused = false;
-    bool single_step = false;
-    Step step_signal;
-    std::mutex mtx;
-    std::mutex mtx_5711;
-    QString taskid;
-    QString connectionName;
-    QString TableName;
-    QString device_id;
-    int step_5322collected_time;
-    int step_5323collected_time;
-    QThread *timerthread;
-    bool is5711Generated = true, is5322Acquired = true, is5323Acquired = true, is8902Acquired = true;
-    bool is5711Ready = false, is5322Ready = false, is5323Ready = false, is8902Ready = false;
-    bool taskCompleted = false;
-    bool continueExecution = true;
-    bool isInterrupted = false;
-    QByteArray connection_image_data;
+    // 初始化设备连接
+    void initDeviceConnections();
 
-    std::vector<TestTask> testtask;
-    std::vector<Step> step;
-    std::vector<PXIe5711Waveform> pxi5711waveform = {};
-    std::vector<PXIe5320Waveform> pxi5322waveform = {};
-    std::vector<PXIe5320Waveform> pxi5323waveform = {};
-    std::vector<Data8902> pxi8902waveform = {};
+    // 断开设备连接
+    void disconnectDevices();
 
+    // 准备设备任务
+    bool prepareDeviceTasks();
 
-    Database database;
-    QThread pxi5711thread;
-    QThread pxi5322thread;
-    QThread pxi5323thread;
-    QThread pxi8902thread;
-    QThread* RunTaskThread;
+    // 设备管理器
+    JYDeviceManager* m_deviceManager;
 
-    std::shared_ptr<PXIe5711> pxi5711;
-    std::shared_ptr<PXIe5320> pxi5322;
-    std::shared_ptr<PXIe5320> pxi5323;
-    std::shared_ptr<PXIe8902> pxi8902;
-    std::shared_ptr<TaskManager> taskManager;
+    // 设备引用
+    PXIe5711* m_device5711;
+    PXIe8902* m_device8902;
+    PXIe5320* m_device5322;
+    PXIe5320* m_device5323;
 
-    void initializeDevices();
-    void loadTaskData(const QString& taskid);
-    void setupDeviceThreads();
-    void connectDeviceSignals();
-    void startMonitoringThread();
-    void WaveformAcquisition(Step& s);
-    void WaveformGeneration(Step& s);
-    void isTaskComplete();
-    void connectDeviceSignals_5322();
-    void connectDeviceSignals_5323();
-    void connectDeviceSignals_5711();
-    void connectDeviceSignals_8902();
+    SaveData* m_saveData = nullptr;
+
+    // 任务配置
+    QVector<TaskConfig> m_taskConfigs;
+
+    // 任务状态
+    TaskStatus m_taskStatus = TaskStatus::Idle;
+
+    // 任务计时器
+    QTimer* m_taskTimer;
+
+    // 活跃设备计数
+    int m_activeDeviceCount = 0;
+
+    // 已完成设备计数
+    int m_completedDeviceCount = 0;
+
+    // 是否存在5711设备
+    bool m_have5711 = false;
+
+    // 是否保存数据
+    bool m_isSaveData = false;
+
+    // 错误消息
+    QString m_errorMessage;
 };
+
 #endif // EXECUTETASK_H

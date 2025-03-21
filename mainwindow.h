@@ -25,6 +25,7 @@
 #include "siftmatcher.h"
 #include "previewdialog.h"
 #include "imageflowdialog.h"
+#include "jydevice.h"
 
 using namespace std;
 QT_BEGIN_NAMESPACE
@@ -43,8 +44,6 @@ public:
     
 private slots:
 
-    void updateMysqlData();
-
     void on_actionPCB_triggered();
 
     void on_actiondevicemanage_triggered();
@@ -57,13 +56,15 @@ private slots:
 
     void on_actionautodetect_triggered();
 
+    void on_actiontdevice_triggered();
+
 private:
     Ui::MainWindow *ui;
     std::shared_ptr<QWidget> currentWidget;
-    // std::shared_ptr<AddTask> addtask;
     std::shared_ptr<ManageTask> manageTask;
     std::shared_ptr<FlowTaskManager> FlowTaskManagerptr;
     std::shared_ptr<DeviceManager> deviceManager;
+    std::shared_ptr<JYDevice> jydevice;
 
     std::shared_ptr<PXIe5320> pxi5322;
     std::shared_ptr<PXIe5320> pxi5323;

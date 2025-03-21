@@ -59,6 +59,9 @@ IRImageDisplay::IRImageDisplay(QWidget *parent) : QWidget(parent) {
 
 IRImageDisplay::~IRImageDisplay() {
     delete displayLabel;
+    delete maxTempLabel;
+    delete minTempLabel;
+    delete centerTempLabel;
 }
 
 void IRImageDisplay::GetMousePosition(int &tempX, int &tempY, int &mouseX, int &mouseY) {
@@ -153,7 +156,6 @@ void IRImageDisplay::Imageupdate() {
     int tempX = 0, tempY = 0, mouseX = 0, mouseY = 0;
     GetMousePosition(tempX, tempY, mouseX, mouseY);
     if (tempX < 0 || tempX >= tempWidth || tempY < 0 || tempY >= tempHeight) {
-        qDebug() << "Mouse position is out of image bounds!";
         return;
     }
     float displayTemp = 0.1 * this->tempData[tempY * tempWidth + tempX];

@@ -1,446 +1,442 @@
 #include "executetask.h"
-#include <QThread>
-#include <memory>
-#include <thread>
-#include <algorithm>
+#include <QDebug>
 
-ExecuteTask::ExecuteTask(const QString taskid, const QString TableName, bool single_step, Step step_signal)
-    : taskid(taskid)
-    , TableName(TableName)
-    , connectionName("ConnectionTask_" + QString::number((quintptr)QThread::currentThreadId()))
-    , database(connectionName, nullptr)
-    , single_step(single_step)
-    , step_signal(step_signal)
+ExecuteTask::ExecuteTask(QObject *parent) : QObject(parent),
+    m_device5711(nullptr),
+    m_device8902(nullptr),
+    m_device5322(nullptr),
+    m_device5323(nullptr),
+    m_taskTimer(nullptr),
+    m_activeDeviceCount(0),
+    m_completedDeviceCount(0),
+    m_have5711(false)
 {
-    device_id = TableName.split("$$")[0];
-    initializeDevices();
-    loadTaskData(taskid);
-    setupDeviceThreads();
-    connectDeviceSignals();
-    startMonitoringThread();
-    taskManager = std::make_shared<TaskManager>(4, TableName);
-}
+    // 获取设备管理器实例
+    m_deviceManager = JYDeviceManager::getInstance();
 
-void ExecuteTask::initializeDevices() {
-    pxi5711 = std::make_shared<PXIe5711>(nullptr);
-    pxi5322 = std::make_shared<PXIe5320>(nullptr, 5322);
-    pxi5323 = std::make_shared<PXIe5320>(nullptr, 5323);
-    pxi8902 = std::make_shared<PXIe8902>(nullptr);
-}
+    if (m_deviceManager) {
+        // 获取各设备引用
+        m_device5711 = m_deviceManager->getDevice5711();
+        m_device8902 = m_deviceManager->getDevice8902();
+        m_device5322 = m_deviceManager->getDevice5322();
+        m_device5323 = m_deviceManager->getDevice5323();
 
-void ExecuteTask::loadTaskData(const QString& taskid) {
-    QString table_name_testtask = device_id + "$$TestTask";
-    QString ErrorMessage;
-    if(!database.get_testtask(table_name_testtask, QString("id = '%1'").arg(taskid), testtask, ErrorMessage))
-    {
-        qDebug() << ErrorMessage;
-        return;
+        // 初始化设备连接
+        initDeviceConnections();
+    } else {
+        qWarning() << "DeviceManager 实例获取失败";
     }
-    if (!testtask.empty()) {
-        connection_image_data = testtask[0].connection_image_data;
-    }
-    QString table_name_step = device_id + "$$Step";
-    database.get_step(table_name_step, QString("test_task_id = '%1'").arg(taskid), step);
-    std::sort(step.begin(), step.end(), [](const Step& a, const Step& b) {
-        return a.step_number < b.step_number;
+
+    // 初始化任务计时器
+    m_taskTimer = new QTimer(this);
+    connect(m_taskTimer, &QTimer::timeout, this, [this]() {
+        if(m_taskStatus != TaskStatus::Idle) stopAllTasks();
     });
-}
-
-void ExecuteTask::setupDeviceThreads() {
-    pxi5711->moveToThread(&pxi5711thread);
-    pxi5322->moveToThread(&pxi5322thread);
-    pxi5323->moveToThread(&pxi5323thread);
-    pxi8902->moveToThread(&pxi8902thread);
-    pxi5711thread.start();
-    pxi5322thread.start();
-    pxi5323thread.start();
-    pxi8902thread.start();
-}
-
-void ExecuteTask::device_StateChanged(const QString& state, int numb) {
-    emit StateChanged(state, numb);
-}
-
-void ExecuteTask::connectDeviceSignals() {
-    connectDeviceSignals_5711();
-    connectDeviceSignals_5322();
-    connectDeviceSignals_5323();
-    connectDeviceSignals_8902();
-}
-
-void ExecuteTask::startMonitoringThread() {
-    timerthread = QThread::create([this]() {
-        while (continueExecution) {
-            this->isTaskComplete();
-            QThread::msleep(20);
-        }
-    });
-    connect(timerthread, &QThread::finished, timerthread, &QObject::deleteLater);
-    timerthread->start();
-}
-
-void ExecuteTask::connectDeviceSignals_5711() {
-    if (!QObject::connect(pxi5711.get(), &PXIe5711::DeviceReady, this, [this]() {
-        emit StateChanged("Device5711 Ready", 0);
-        is5711Ready = true;
-        cv_5711.notify_one();
-    })) {
-        qDebug() << "Failed to connect 5711 DeviceReady signal";
-    }
-    if (!QObject::connect(pxi5711.get(), &PXIe5711::WaveformGenerated, this, [this]() {
-        emit StateChanged("Waveform Generated", 0);
-        is5711Generated = true;
-    })) {
-        qDebug() << "Failed to connect 5711 WaveformGenerated signal";
-    }
-    if (!QObject::connect(pxi5711.get(), &PXIe5711::StateChanged, this, [this](const QString& state, int numb) {
-        device_StateChanged(state, numb);
-    })) {
-        qDebug() << "Failed to connect 5711 StateChanged signal";
-    }
-}
-
-void ExecuteTask::connectDeviceSignals_5322() {
-    if (!QObject::connect(pxi5322.get(), &PXIe5320::DeviceReady, this, [this]() {
-        emit StateChanged("Device5322 Ready", 0);
-        is5322Ready = true;
-        cv_5711.notify_one();
-    })) {
-        qDebug() << "Failed to connect 5322 DeviceReady signal";
-    }
-    if (!QObject::connect(pxi5322.get(), &PXIe5320::signalAcquisitionData, this, [this](const auto& data, int serial_number) { 
-        SlotAcquisitionData_5322(data, serial_number); 
-        step_5322collected_time ++;
-        int emit_time = (std::min(step_5322collected_time, step_5323collected_time) > 0) ? std::min(step_5322collected_time, step_5323collected_time) : std::max(step_5322collected_time, step_5323collected_time);
-        emit StateChanged("step_collectedtime", emit_time);
-    })) {
-        qDebug() << "Failed to connect 5322 signalAcquisitionData signal";
-    }
-    if (!QObject::connect(pxi5322.get(), &PXIe5320::CompleteAcquisition, this, [this]() {
-        emit StateChanged("Waveform Acquired", 0);
-        is5322Acquired = true;
-    })) {
-        qDebug() << "Failed to connect 5322 CompleteAcquisition signal";
-    }
-    if (!QObject::connect(pxi5322.get(), &PXIe5320::StateChanged, this, [this](const QString& state, int numb) {
-        device_StateChanged(state, numb);
-    })) {
-        qDebug() << "Failed to connect 5322 StateChanged signal";
-    }
-}
-
-void ExecuteTask::connectDeviceSignals_5323() {
-    if (!QObject::connect(pxi5323.get(), &PXIe5320::DeviceReady, this, [this]() {
-        emit StateChanged("Device5323 Ready", 0);
-        is5323Ready = true;
-        cv_5711.notify_one();
-    })) {
-        qDebug() << "Failed to connect 5323 DeviceReady signal";
-    }
-    if (!QObject::connect(pxi5323.get(), &PXIe5320::signalAcquisitionData, this, [this](const auto& data, int serial_number) { 
-        SlotAcquisitionData_5323(data, serial_number); 
-        step_5323collected_time ++;
-        int emit_time = (std::min(step_5322collected_time, step_5323collected_time) > 0) ? std::min(step_5322collected_time, step_5323collected_time) : std::max(step_5322collected_time, step_5323collected_time);
-        emit StateChanged("step_collectedtime", emit_time);
-    })) {
-        qDebug() << "Failed to connect 5323 signalAcquisitionData signal";
-    }
-    if (!QObject::connect(pxi5323.get(), &PXIe5320::CompleteAcquisition, this, [this]() {
-        emit StateChanged("Waveform Acquired", 0);
-        is5323Acquired = true;
-    })) {
-        qDebug() << "Failed to connect 5323 CompleteAcquisition signal";
-    }
-    if (!QObject::connect(pxi5323.get(), &PXIe5320::StateChanged, this, [this](const QString& state, int numb) {
-        device_StateChanged(state, numb);
-    })) {
-        qDebug() << "Failed to connect 5323 StateChanged signal";
-    }
-}
-
-void ExecuteTask::connectDeviceSignals_8902() {
-    if (!QObject::connect(pxi8902.get(), &PXIe8902::DeviceReady, this, [this]() {
-        emit StateChanged("Device8902 Ready", 0);
-        is8902Ready = true;
-        cv_5711.notify_one();
-    })) {
-        qDebug() << "Failed to connect 8902 DeviceReady signal";
-    }
-    if (!QObject::connect(pxi8902.get(), &PXIe8902::signalAcquisitionData, this, [this](const auto& data, int serial_number) { 
-        SlotAcquisitionData_8902(data, serial_number); 
-    })) {
-        qDebug() << "Failed to connect 8902 signalAcquisitionData signal";
-    }
-    if (!QObject::connect(pxi8902.get(), &PXIe8902::CompleteAcquisition, this, [this]() {
-        emit StateChanged("Waveform Acquired", 0);
-        is8902Acquired = true;
-    })) {
-        qDebug() << "Failed to connect 8902 CompleteAcquisition signal";
-    }
-    if (!QObject::connect(pxi8902.get(), &PXIe8902::StateChanged, this, [this](const QString& state, int numb) {
-        device_StateChanged(state, numb);
-    })) {
-        qDebug() << "Failed to connect 8902 StateChanged signal";
-    }
 }
 
 ExecuteTask::~ExecuteTask()
 {
-    continueExecution = false;
+    // 确保停止所有任务
+    stopAllTasks();
 
-    pxi5711waveform.clear();
-    pxi5322waveform.clear();
-    pxi5323waveform.clear();
-    database.disconnect();
-    if (timerthread) {
-        timerthread->quit();
-        timerthread->wait();
-        timerthread->deleteLater();
-    }
-    if (RunTaskThread) {
-        RunTaskThread->quit();
-        RunTaskThread->wait();
-        RunTaskThread->deleteLater();
-    }
-    
-    if (pxi5711thread.isRunning()) {
-        pxi5711thread.quit();
-        pxi5711thread.wait();
-        pxi5711thread.deleteLater();
-    }
-    if (pxi5322thread.isRunning()) {
-        pxi5322thread.quit();
-        pxi5322thread.wait();
-        pxi5322thread.deleteLater();
-    }
-    if (pxi5323thread.isRunning()) {
-        pxi5323thread.quit();
-        pxi5323thread.wait();
-        pxi5323thread.deleteLater();
-    }
-    if (pxi8902thread.isRunning()) {
-        pxi8902thread.quit();
-        pxi8902thread.wait();
-        pxi8902thread.deleteLater();
-    }
+    // 断开设备连接
+    disconnectDevices();
 }
 
-void ExecuteTask::isTaskComplete()
+void ExecuteTask::configureTask(const QVector<TaskConfig>& configs)
 {
-    if (is5711Generated && is5322Acquired && is5323Acquired && is8902Acquired && taskCompleted && taskManager->isFinished(taskCompleted)) {
-        if(!isInterrupted)
-        {
-            emit StateChanged("Step Finished", step.size());
-            qDebug() << "任务完成";
-        }else
-        {
-            emit StateChanged("Step Interrupted", 0);
-        }
-        continueExecution = false;
-        emit TaskFinished();
-    }
-}
+    // 保存任务配置
+    m_taskConfigs = configs;
 
-void ExecuteTask::WaveformAcquisition(Step& s)
-{
-    QString table_name_pxie5711 = device_id + "$$PXIe5711";
-    database.get_pxie5711waveform(table_name_pxie5711, QString("step_id = '%1'").arg(s.id), pxi5711waveform);
-    QString table_name_pxie5320 = device_id + "$$PXIe5320";
-    database.get_pxie5320waveform(table_name_pxie5320, QString("step_id = '%1' AND device = 5322").arg(s.id), pxi5322waveform);
-    database.get_pxie5320waveform(table_name_pxie5320, QString("step_id = '%1' AND device = 5323").arg(s.id), pxi5323waveform);
-    QString table_name_pxie8902 = device_id + "$$PXIe8902";
-    database.get_8902data(table_name_pxie8902, QString("step_id = '%1'").arg(s.id), pxi8902waveform);
-}
+    // 重置计数器
+    m_activeDeviceCount = 0;
+    m_completedDeviceCount = 0;
+    m_have5711 = false;
 
-void ExecuteTask::WaveformGeneration(Step& s)
-{
-    if (pxi5711waveform.empty() && pxi5322waveform.empty() && pxi5323waveform.empty() && pxi8902waveform.empty()) {
-        qDebug() << "未添加输出/输入端口。";
-        return;
-    }
+    // 设置为非连续采集模式 - 添加空指针检查
+    if (m_device8902) m_device8902->continueAcquisition = false;
+    if (m_device5322) m_device5322->continueAcquisition = false;
+    if (m_device5323) m_device5323->continueAcquisition = false;
 
-    if(!pxi5711waveform.empty())
-    {
-        QMetaObject::invokeMethod(pxi5711.get(), "receivewaveform", Qt::QueuedConnection,
-                              Q_ARG(std::vector<PXIe5711Waveform>, pxi5711waveform));
-    }else
-    {
-        is5711Ready = true;
-        is5711Generated = true;
-    }
-
-    auto startAcquisition = [this](std::shared_ptr<PXIe5320>& device, auto& waveform, double collecttime) {
-        if (!waveform.empty()) {
-            QMetaObject::invokeMethod(device.get(), "StartAcquisition", Qt::QueuedConnection,
-                                      Q_ARG(std::vector<PXIe5320Waveform>, waveform),
-                                      Q_ARG(double, collecttime));
-            emit StateChanged("Device" + QString::number(device->cardID) + "Ready", 0);
-        }
-        else
-        {
-            if (device->cardID == 5322) {
-                is5322Acquired = true;
-                is5322Ready = true;
-            } else if (device->cardID == 5323) {
-                is5323Acquired = true;
-                is5323Ready = true;
-            }
-        }
-    };
-
-    if(!pxi8902waveform.empty())
-    {
-        QMetaObject::invokeMethod(pxi8902.get(), "StartAcquisition", Qt::QueuedConnection,
-                              Q_ARG(std::vector<Data8902>, pxi8902waveform),
-                              Q_ARG(double, s.collecttime));
-    }else
-    {
-        is8902Acquired = true;
-        is8902Ready = true;
-    }
-
-    startAcquisition(pxi5322, pxi5322waveform, s.collecttime);
-    startAcquisition(pxi5323, pxi5323waveform, s.collecttime);
-
-    std::unique_lock<std::mutex> lock(mtx_5711);
-    cv_5711.wait(lock, [this] { return (is5711Ready && is5322Ready && is5323Ready && is8902Ready) || isInterrupted; });
-    if(!isInterrupted)
-    {
-        if(!is5711Generated)
-            QMetaObject::invokeMethod(pxi5711.get(), "SendSoftTrigger", Qt::QueuedConnection);
-        if(!is5322Acquired)
-            QMetaObject::invokeMethod(pxi5322.get(), "SendSoftTrigger", Qt::QueuedConnection);
-        if(!is5323Acquired)
-            QMetaObject::invokeMethod(pxi5323.get(), "SendSoftTrigger", Qt::QueuedConnection);
-        if(!is8902Acquired)
-            QMetaObject::invokeMethod(pxi8902.get(), "SendSoftTrigger", Qt::QueuedConnection);
-        emit GetInfraredImage(s);
-    }
-
-    is5711Ready = false;
-    is5322Ready = false;
-    is5323Ready = false;
-    is8902Ready = false;
-
-
-    pxi5711waveform.clear();
-    pxi5322waveform.clear();
-    pxi5323waveform.clear();
-    pxi8902waveform.clear();
-}
-void ExecuteTask::SlotAcquisitionData_5322(const std::vector<PXIe5320Waveform> collectdata, int serial_number)
-{
-    if(!continueExecution) return;
-    qDebug() << "5322 Waveform Acquired";
-    taskManager->addTask(collectdata, serial_number);
-    emit StateChanged("5322 Waveform Acquired", 0);
-}
-
-void ExecuteTask::SlotAcquisitionData_5323(const std::vector<PXIe5320Waveform> collectdata, int serial_number)
-{
-    if(!continueExecution) return;
-    qDebug() << "5323 Waveform Acquired";
-    taskManager->addTask(collectdata, serial_number);
-    emit StateChanged("5323 Waveform Acquired", 0);
-}
-
-void ExecuteTask::SlotAcquisitionData_8902(const std::vector<PXIe5320Waveform> collectdata, int serial_number)
-{
-    if(!continueExecution) return;
-    qDebug() << "8902 Waveform Acquired";
-    taskManager->addTask(collectdata, serial_number);
-    emit StateChanged("8902 Waveform Acquired", 0);
-}
-
-void ExecuteTask::StartTask()
-{
-    emit StateChanged("State Init", static_cast<int>(step.size()));
-    RunTaskThread = QThread::create([this]() {
-        if (!continueExecution) return;
-        if(single_step) // 单步执行
-        {
-            if(is5711Generated && is5322Acquired && is5323Acquired && is8902Acquired)
+    // 计算活跃设备数量
+    for (const auto& config : m_taskConfigs) {
+        if (config.enabled) {
+            m_activeDeviceCount++;
+            if(config.deviceType == DeviceType::PXIe5711)
             {
-                if(!step_signal.continue_step) {
-                    paused = true;
-                    std::unique_lock<std::mutex> lock(mtx);
-                    cv.wait(lock, [this] { return !paused; });
-                }
-
-                if(!isInterrupted)
-                {
-                    step_5322collected_time = 0;
-                    step_5323collected_time = 0;
-
-                    emit StateChanged("step_collecttime", step_signal.collecttime);
-                    is5711Generated = false;
-                    is5322Acquired = false;
-                    is5323Acquired = false;
-                    is8902Acquired = false;
-
-
-                    WaveformAcquisition(step_signal);
-                    WaveformGeneration(step_signal);
-                }
-            }
-        }else{ // 执行整个任务
-            int i = 0;
-            while (i < step.size() && continueExecution) {
-
-                if(isInterrupted) break;
-
-                if(is5711Generated && is5322Acquired && is5323Acquired && is8902Acquired)
-                {
-                    emit StateChanged("Step Finished", i);
-
-                    if(!step[i].continue_step) {
-                        paused = true;
-                        emit StateChanged("Connect Wire:" + step[i].id, i);
-                        std::unique_lock<std::mutex> lock(mtx);
-                        cv.wait(lock, [this] { return !paused; });
-                    }
-
-                    if(isInterrupted) break;
-
-                    emit StateChanged("Step Begin", i + 1);
-                    is5711Generated = false;
-                    is5322Acquired = false;
-                    is5323Acquired = false;
-                    is8902Acquired = false;
-
-
-                    step_5322collected_time = 0;
-                    step_5323collected_time = 0;
-
-                    emit StateChanged("step_collecttime", step[i].collecttime);
-                    WaveformAcquisition(step[i]);
-                    WaveformGeneration(step[i]);
-                    i++;
-                }
+                m_have5711 = true;
             }
         }
-        taskCompleted = true;
-    });
-    RunTaskThread->start();
-}
-
-void ExecuteTask::InterruptTask()
-{
-    isInterrupted = true;
-    if(!paused)
-    {
-        QMetaObject::invokeMethod(pxi5322.get(), "InterruptAcquisition", Qt::QueuedConnection);
-        QMetaObject::invokeMethod(pxi5323.get(), "InterruptAcquisition", Qt::QueuedConnection);
-        QMetaObject::invokeMethod(pxi5711.get(), "InterruptAcquisition", Qt::QueuedConnection);
-        QMetaObject::invokeMethod(pxi8902.get(), "InterruptAcquisition", Qt::QueuedConnection);
     }
-    paused = false;
-    cv.notify_one();
-    cv_5711.notify_one();
+
+    m_taskStatus = TaskStatus::Idle;
+    // 更新任务状态
+    emit taskStatusChanged(m_taskStatus, "任务已配置");
 }
 
-void ExecuteTask::ContinueTask()
+bool ExecuteTask::startAllTasks()
 {
-    paused = false;
-    cv.notify_one();
+    // 检查设备管理器是否可用
+    if (!m_deviceManager) {
+        m_errorMessage = "设备管理器不可用";
+        emit taskError(m_errorMessage);
+        return false;
+    }
+
+    // 检查是否有任务配置
+    if (m_taskConfigs.isEmpty()) {
+        m_errorMessage = "没有配置任务";
+        emit taskError(m_errorMessage);
+        return false;
+    }
+
+    // 准备设备任务
+    if (!prepareDeviceTasks()) {
+        return false;
+    }
+
+    // 更新任务状态
+    m_taskStatus = TaskStatus::Ready;
+    emit taskStatusChanged(m_taskStatus, "任务已启动");
+
+    return true;
 }
+
+bool ExecuteTask::triggerAllTasks()
+{
+    // 检查设备管理器是否可用
+    if (!m_deviceManager) {
+        m_errorMessage = "设备管理器不可用";
+        emit taskError(m_errorMessage);
+        return false;
+    }
+
+    // 检查任务状态
+    if (m_taskStatus != TaskStatus::Ready) {
+        m_errorMessage = "任务未处于准备状态，无法触发";
+        emit taskError(m_errorMessage);
+        return false;
+    }
+
+    QString errorMsg;
+    // 触发各设备
+    bool success = true;
+
+    for (const auto& config : m_taskConfigs) {
+        if (!config.enabled) continue;
+
+        switch (config.deviceType) {
+        case DeviceType::PXIe5711:
+            if (m_device5711 && m_device5711->getStatus() == PXIe5711Status::Ready) {
+                // 使用QMetaObject::invokeMethod确保线程安全
+                QMetaObject::invokeMethod(m_device5711, "SendSoftTrigger", Qt::QueuedConnection);
+                if(m_activeDeviceCount == 1)
+                {
+                    m_taskTimer->start(config.collectTime * 1000);
+                }
+            } else {
+                errorMsg += "输出 设备未准备好；";
+                success = false;
+            }
+            break;
+
+        case DeviceType::PXIe8902:
+            if (m_device8902 && m_device8902->getStatus() == PXIe8902Status::Ready) {
+                // 使用QMetaObject::invokeMethod确保线程安全
+                QMetaObject::invokeMethod(m_device8902, "SendSoftTrigger", Qt::QueuedConnection);
+            } else {
+                errorMsg += "万用表 设备未准备好；";
+                success = false;
+            }
+            break;
+
+        case DeviceType::PXIe5322:
+            if (m_device5322 && m_device5322->getStatus() == PXIe5320Status::Ready) {
+                // 使用QMetaObject::invokeMethod确保线程安全
+                QMetaObject::invokeMethod(m_device5322, "SendSoftTrigger", Qt::QueuedConnection);
+            } else {
+                errorMsg += "数字量输入 设备未准备好；";
+                success = false;
+            }
+            break;
+
+        case DeviceType::PXIe5323:
+            if (m_device5323 && m_device5323->getStatus() == PXIe5320Status::Ready) {
+                // 使用QMetaObject::invokeMethod确保线程安全
+                QMetaObject::invokeMethod(m_device5323, "SendSoftTrigger", Qt::QueuedConnection);
+            } else {
+                errorMsg += "模拟量输入 设备未准备好；";
+                success = false;
+            }
+            break;
+
+        default:
+            success = false;
+            break;
+        }
+    }
+
+    if (!success) {
+        m_errorMessage = errorMsg;
+        m_deviceManager->CloseAllDevices();
+        emit taskError(m_errorMessage);
+    }
+    else
+    {
+        m_taskStatus = TaskStatus::Running;
+        emit taskStatusChanged(m_taskStatus, "任务已触发");
+    }
+
+    return success;
+}
+
+void ExecuteTask::stopAllTasks()
+{
+    if(m_taskStatus == TaskStatus::Idle) return;
+
+    // 停止各设备
+    for (const auto& config : m_taskConfigs) {
+        if (!config.enabled) continue;
+
+        switch (config.deviceType) {
+        case DeviceType::PXIe5711:
+            if (m_device5711) {
+                m_device5711->CloseDevice();
+            }
+            break;
+
+        case DeviceType::PXIe8902:
+            if (m_device8902) {
+                // 使用直接调用而不是QMetaObject::invokeMethod
+                m_device8902->DeviceClose();
+            }
+            break;
+
+        case DeviceType::PXIe5322:
+            if (m_device5322) {
+                // 使用直接调用而不是QMetaObject::invokeMethod
+                m_device5322->DeviceClose();
+            }
+            break;
+
+        case DeviceType::PXIe5323:
+            if (m_device5323) {
+                // 使用直接调用而不是QMetaObject::invokeMethod
+                m_device5323->DeviceClose();
+            }
+            break;
+
+        default:
+            break;
+        }
+    }
+
+    // 更新任务状态
+    if (m_taskStatus == TaskStatus::Running) {
+        m_taskStatus = TaskStatus::Completed;
+        emit taskStatusChanged(m_taskStatus, "任务已停止");
+    }
+
+    // 停止任务计时器
+    if (m_taskTimer && m_taskTimer->isActive()) {
+        m_taskTimer->stop();
+    }
+}
+
+void ExecuteTask::onDeviceStateChanged(const QString& state, int code)
+{
+    // 处理设备状态变化
+    if (code < 0) {
+        // 设备错误
+        m_errorMessage = state;
+        m_taskStatus = TaskStatus::Error;
+        emit taskError(m_errorMessage);
+        emit taskStatusChanged(m_taskStatus, "任务出错: " + state);
+    }
+}
+
+void ExecuteTask::onDeviceDataReceived(const std::vector<PXIe5320Waveform>& data, int serialNumber)
+{
+    if(!data.empty())
+        qDebug() << "采集设备" << data[0].device << "数据大小" << data[0].data.size();
+    if(m_isSaveData)
+    {
+        m_saveData->addTask(data, serialNumber);
+    }
+    m_completedDeviceCount++;
+    if(m_completedDeviceCount == (m_activeDeviceCount - static_cast<int>(m_have5711)))
+    {
+        m_taskStatus = TaskStatus::Completed;
+        stopAllTasks();
+        emit taskStatusChanged(m_taskStatus, "任务已完成");
+        emit taskCompleted();
+    }
+}
+
+void ExecuteTask::initDeviceConnections()
+{
+    // 连接设备信号
+    if (m_device5711) {
+        connect(m_device5711, &PXIe5711::StateChanged, this, &ExecuteTask::onDeviceStateChanged);
+        connect(m_device5711, &PXIe5711::WaveformGenerated, this, [this]() {
+            // 处理波形生成完成
+        });
+    }
+
+    if (m_device8902) {
+        connect(m_device8902, &PXIe8902::StateChanged, this, &ExecuteTask::onDeviceStateChanged);
+        connect(m_device8902, &PXIe8902::signalAcquisitionData, this, &ExecuteTask::onDeviceDataReceived);
+    }
+
+    if (m_device5322) {
+        connect(m_device5322, &PXIe5320::StateChanged, this, &ExecuteTask::onDeviceStateChanged);
+        connect(m_device5322, &PXIe5320::signalAcquisitionData, this, &ExecuteTask::onDeviceDataReceived);
+    }
+
+    if (m_device5323) {
+        connect(m_device5323, &PXIe5320::StateChanged, this, &ExecuteTask::onDeviceStateChanged);
+        connect(m_device5323, &PXIe5320::signalAcquisitionData, this, &ExecuteTask::onDeviceDataReceived);
+    }
+}
+
+void ExecuteTask::disconnectDevices()
+{
+    // 断开设备连接
+    if (m_device5711) {
+        disconnect(m_device5711, nullptr, this, nullptr);
+    }
+
+    if (m_device8902) {
+        disconnect(m_device8902, nullptr, this, nullptr);
+    }
+
+    if (m_device5322) {
+        disconnect(m_device5322, nullptr, this, nullptr);
+    }
+
+    if (m_device5323) {
+        disconnect(m_device5323, nullptr, this, nullptr);
+    }
+}
+
+bool ExecuteTask::prepareDeviceTasks()
+{
+    if(m_taskStatus != TaskStatus::Idle) return false;
+    bool success = true;
+    QString errorMsg;
+    // 准备各设备任务
+    for (const auto& config : m_taskConfigs) {
+        if (!config.enabled) continue;
+
+        switch (config.deviceType) {
+        case DeviceType::PXIe5711:
+            if (m_device5711 && m_device5711->getStatus() == PXIe5711Status::Closed) {
+                // 使用 std::visit 从 variant 中提取 PXIe5711Waveform 参数
+                std::visit([&](const auto& params) {
+                    using T = std::decay_t<decltype(params)>;
+                    if constexpr (std::is_same_v<T, std::vector<PXIe5711Waveform>>) {
+                        // 直接调用而不是使用QMetaObject::invokeMethod
+                        bool result = m_device5711->receivewaveform(params);
+                        if(!result) errorMsg += m_device5711->getErrorMessage();
+                        success &= result;
+                    } else {
+                        errorMsg += "输出 参数类型不匹配；";
+                        success = false;
+                    }
+                }, config.parameters);
+            } else {
+                if(m_device5711->getStatus() != PXIe5711Status::Closed) errorMsg += "输出 设备未关闭；";
+                success = false;
+            }
+            break;
+
+        case DeviceType::PXIe8902:
+            if (m_device8902 && m_device8902->getStatus() == PXIe8902Status::Closed) {
+                // 使用 std::visit 从 variant 中提取 Data8902 参数
+                std::visit([&](const auto& params) {
+                    using T = std::decay_t<decltype(params)>;
+                    if constexpr (std::is_same_v<T, std::vector<Data8902>>) {
+                        // 直接调用而不是使用QMetaObject::invokeMethod
+                        bool result = m_device8902->StartAcquisition(params, config.collectTime);
+                        if(!result) errorMsg += m_device8902->getErrorMessage();
+                        success &= result;
+                    } else {
+                        errorMsg = "万用表 参数类型不匹配；";
+                        success = false;
+                    }
+                }, config.parameters);
+            } else {
+                if(m_device8902->getStatus() != PXIe8902Status::Closed) errorMsg += "万用表 设备未关闭；";
+                success = false;
+            }
+            break;
+
+        case DeviceType::PXIe5322:
+            if (m_device5322 && m_device5322->getStatus() == PXIe5320Status::Closed) {
+                // 使用 std::visit 从 variant 中提取 PXIe5320Waveform 参数
+                std::visit([&](const auto& params) {
+                    using T = std::decay_t<decltype(params)>;
+                    if constexpr (std::is_same_v<T, std::vector<PXIe5320Waveform>>) {
+                        // 直接调用
+                        bool result = m_device5322->StartAcquisition(params, config.collectTime);
+                        if(!result) errorMsg += m_device5322->getErrorMessage();
+                        success &= result;
+                    } else {
+                        errorMsg += "数字量输入 参数类型不匹配；";
+                        success = false;
+                    }
+                }, config.parameters);
+            } else {
+                if(m_device5322->getStatus() != PXIe5320Status::Closed) errorMsg += "数字量输入 设备未关闭；";
+                success = false;
+            }
+            break;
+
+        case DeviceType::PXIe5323:
+            if (m_device5323 && m_device5323->getStatus() == PXIe5320Status::Closed) {
+                // 使用 std::visit 从 variant 中提取 PXIe5320Waveform 参数
+                std::visit([&](const auto& params) {
+                    using T = std::decay_t<decltype(params)>;
+                    if constexpr (std::is_same_v<T, std::vector<PXIe5320Waveform>>) {
+                        // 直接调用而不是使用QMetaObject::invokeMethod
+                        bool result = m_device5323->StartAcquisition(params, config.collectTime);
+                        if(!result) errorMsg += m_device5323->getErrorMessage();
+                        success &= result;
+                    } else {
+                        errorMsg += "模拟量输入 参数类型不匹配；";
+                        success = false;
+                    }
+                }, config.parameters);
+            } else {
+                if(m_device5323->getStatus() != PXIe5320Status::Closed) errorMsg += "模拟量输入 设备未关闭；";
+                success = false;
+            }
+            break;
+
+        default:
+            success = false;
+            break;
+        }
+    }
+
+    if (!success) {
+        m_errorMessage = errorMsg;
+        m_deviceManager->CloseAllDevices();
+        emit taskError(m_errorMessage);
+    }
+    else
+    {
+        m_taskStatus = TaskStatus::Ready;
+        emit taskStatusChanged(m_taskStatus, "任务已准备");
+    }
+
+    return success;
+}
+
+void ExecuteTask::SetsaveData(int ThreadNum, const QString& TableName, bool saveData)
+{
+    if(m_saveData != nullptr) delete m_saveData;
+    m_saveData = new SaveData(ThreadNum, TableName);
+    m_isSaveData = saveData;
+}
+

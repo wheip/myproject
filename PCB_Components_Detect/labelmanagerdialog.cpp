@@ -6,7 +6,7 @@
 
 LabelManagerDialog::LabelManagerDialog(QWidget *parent,
                                        const QImage &image,
-                                       const QString &deviceId,
+                                       const int &deviceId,
                                        const std::vector<Label> &Addlabels)
     : QDialog(parent),
       labelInfoAdd(Addlabels)

@@ -1,7 +1,7 @@
 #ifndef TASKCONNECTWIRE_H
 #define TASKCONNECTWIRE_H
 
-#include <QWidget>
+#include <QDialog>
 #include "ClassList.h"
 #include "database.h"
 #include "labelediting.h"
@@ -16,16 +16,16 @@ namespace Ui {
 class TaskConnectWire;
 }
 
-class TaskConnectWire : public QWidget
+class TaskConnectWire : public QDialog
 {
     Q_OBJECT
 
 public:
-    explicit TaskConnectWire(QWidget *parent = nullptr, QStackedWidget *stackedWidget = nullptr);
+    explicit TaskConnectWire(QWidget *parent = nullptr);
     ~TaskConnectWire();
 
-    void setStep(const QString step_id);
-    void setDevice(const QString device_id);
+    void setStep(const int step_id);
+    void setDevice(const int device_id);
 
 public slots:
 
@@ -44,8 +44,8 @@ private:
     std::condition_variable cv;
     bool is_init_ui = false;
     std::condition_variable init_ui_cv;
-    QString step_id;
-    QString device_id;
+    int step_id;
+    int device_id;
     QImage LabeledingImage;
     std::vector<Label> label_info;
     std::vector<Label> label_info_add;

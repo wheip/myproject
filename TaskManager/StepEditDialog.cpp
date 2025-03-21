@@ -12,7 +12,7 @@
 #include "database.h"
 #include "deviceid.h"
 
-StepEditDialog::StepEditDialog(const Step &step, const QString& deviceId, QWidget *parent)
+StepEditDialog::StepEditDialog(const Step &step, const int& deviceId, QWidget *parent)
     : QDialog(parent),
       m_step(step),
       m_deviceId(deviceId)
@@ -72,7 +72,7 @@ void StepEditDialog::setupTable()
     QTableWidgetItem *propId = new QTableWidgetItem("id");
     propId->setFlags(propId->flags() & ~Qt::ItemIsEditable);  // 设置为不可编辑
     tableWidget->setItem(0, 0, propId);
-    QTableWidgetItem *itemId = new QTableWidgetItem(m_step.id);
+    QTableWidgetItem *itemId = new QTableWidgetItem(QString::number(m_step.id));
     itemId->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
     tableWidget->setItem(0, 1, itemId);
 

@@ -3,7 +3,7 @@
 
 #include <QObject>
 
-extern QString current_device_id;
+extern int current_device_id;
 class DeviceId : public QObject
 {
     Q_OBJECT
@@ -13,11 +13,11 @@ public:
         return instance;
     }
 
-    QString getDeviceId() const {
+    int getDeviceId() const {
         return current_device_id;
     }
 
-    void setDeviceId(const QString& device_id) {
+    void setDeviceId(const int& device_id) {
         if (current_device_id != device_id) {
             current_device_id = device_id;
             emit deviceChanged(device_id);
@@ -25,7 +25,7 @@ public:
     }
 
 signals:
-    void deviceChanged(const QString& device_id);
+    void deviceChanged(const int& device_id);
 
 protected:
     DeviceId() {} // 构造函数设为protected
@@ -33,7 +33,7 @@ protected:
     DeviceId& operator=(const DeviceId&) = delete;
 
 private:
-    QString current_device_id;
+    int current_device_id;
 };
 
 #define gDeviceId DeviceId::instance()

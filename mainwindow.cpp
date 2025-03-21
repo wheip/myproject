@@ -14,8 +14,7 @@
 #include <QWidget>
 
 bool taskisexecuting = false;
-QString current_device_id = "";
-
+int current_device_id = -1;
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
@@ -26,6 +25,7 @@ MainWindow::MainWindow(QWidget *parent)
     // addtask = std::make_shared<AddTask>(this);
     FlowTaskManagerptr = std::make_shared<FlowTaskManager>(this);
     deviceManager = std::make_shared<DeviceManager>(this);
+    jydevice = std::make_shared<JYDevice>(this);
     ui->setupUi(this);
     ui->statusbar->showMessage("Ready");
     manageTask->close();
@@ -33,7 +33,7 @@ MainWindow::MainWindow(QWidget *parent)
     pcbcomponentsdetect = std::make_shared<PCBComponentsDetect>(nullptr);
     pxi5711 = std::make_shared<PXIe5711>();
     
-    g_FolderCheck.Check_Folder(); // 检查文件夹完整性
+    // g_FolderCheck.Check_Folder(); // 检查文件夹完整性
 
     InitListSelectDevice();
     currentWidget = FlowTaskManagerptr;
@@ -45,9 +45,7 @@ MainWindow::MainWindow(QWidget *parent)
 MainWindow::~MainWindow()
 
 {
-    qDebug() << "MainWindow::~MainWindow()";
     delete ui;
-    qDebug() << "MainWindow::~MainWindow() end";
 }
 
 void MainWindow::switchWidget(std::shared_ptr<QWidget> newWidget)
@@ -104,9 +102,12 @@ void MainWindow::on_actiontaskmanage_triggered()
     switchWidget(manageTask);
 }
 
-void MainWindow::updateMysqlData()
+void MainWindow::on_actiontdevice_triggered()
 {
-    // updatamysqldata->notyfy();
+    if(currentWidget){
+        currentWidget->hide();
+    }
+    switchWidget(jydevice);
 }
 
 void MainWindow::on_actiondevicemanage_triggered()
@@ -129,7 +130,7 @@ void MainWindow::InitListSelectDevice()
     
     ui->menulistselect->addAction(action);
     for(const auto& device : devices){
-        QAction* action = new QAction(device.id, ui->menulistselect);
+        QAction* action = new QAction(QString::number(device.id), ui->menulistselect);
         ui->menulistselect->addAction(action);
         connect(action, &QAction::triggered, [this, device](){
             current_device_id = device.id;
@@ -180,7 +181,7 @@ void MainWindow::onImageCaptured(const cv::Mat& image)
             imageFlowDialog->loadImages(imagePaths);
              connect(imageFlowDialog, &ImageFlowDialog::imageSelected, this, [this](const QString& path) {
                 QString id = path.split("/").last().split(".").first();
-                gDeviceId.setDeviceId(id);
+                gDeviceId.setDeviceId(id.toInt());
             });
             imageFlowDialog->exec();
             imageFlowDialog->deleteLater();

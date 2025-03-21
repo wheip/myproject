@@ -7,7 +7,6 @@
 #include <led.h>
 #include <uestcqcustomplot.h>
 #include <iostream>
-#include <executetask.h>
 #include <memory>
 #include <QMainWindow>
 #include <QStatusBar>
@@ -24,6 +23,7 @@
 #include "taskconnectwire.h"
 #include "FolderCheck.h"
 #include "ch340.h"
+#include "runtask.h"
 
 
 namespace Ui {
@@ -40,12 +40,10 @@ public:
     void MainWindowchange(QEvent *event);
 
     void deleteImage(const QString &imageId);
-
-    void ConnectWire(QString step_id);
 private slots:
-    void displayWaveform(const QString& waveformid, const QString& path, const int deviceType);
+    void displayWaveform(const QString& path, const int& deviceType, const QString& stepNumber, const QString& port);
 
-    void undisplayWaveform(const QString& waveformid, const QString& tableName, const int deviceType);
+    void undisplayWaveform(const QString& path, const int& deviceType);
 
     void on_pbViewTask_clicked();
 
@@ -65,11 +63,7 @@ private slots:
 
     void on_comboBox_taskid_activated(int index);
 
-    void saveinfraredframe(const QImage& image, uint16_t *tempData, uint32_t tempWidth, uint32_t tempHeight);
-
     void on_pblabelinfoshow_clicked();
-
-    void GetInfraredImage(Step step);
 
     void on_pb8902expand_clicked();
 
@@ -77,7 +71,7 @@ private slots:
 
     void on_pb5323expand_clicked();
 
-    void saveinfraredframe_hypertherm(QImage image, std::vector<uint16_t> tempData, uint32_t tempWidth, uint32_t tempHeight);
+    void StateChanged(int state, const QString& message);
 
 signals:
     void UpdateMysqlDataSignal();
@@ -88,17 +82,16 @@ private:
     Database database;
     std::vector<TestTask> currentTasks;
     QString currentTaskId;
-    QString &device_id;
+    int &device_id;
     QString current_run_task_id;
     QString current_run_task_table;
     Image IRimage;
     Step current_step;
     int element_id;
     std::vector<LED*> leds;
-    std::shared_ptr<ExecuteTask> localExecuteTask;
+    RunTask* runTask;
     std::shared_ptr<QThread> taskThread;
     std::shared_ptr<LabelEditingWindow> labelediting;
-    // std::unique_ptr<PXIe8902> pxie8902;
     std::vector<std::vector<float>> displaydata5322;
     std::vector<std::vector<float>> displaydata5323;
     std::vector<std::vector<float>> displaydata8902;
@@ -134,7 +127,6 @@ private:
     QStackedWidget *stackedWidget;
     std::shared_ptr<TaskConnectWire> taskConnectWire;
     QStackedWidget *stackedWidget_connectwire;
-    Camera& infraredcamera;
     bool is_infraredcamera_save = false;
     int step_collectedtime = 0;
 
@@ -146,24 +138,23 @@ private:
     void UpdateDisplay();
     void ComboBoxInit();
     void setupTreeWidget(const std::vector<Step>& steps);
-    void setupStepContextMenu(QTreeWidgetItem *item, const QString &tableName);
+    void setupStepContextMenu(QTreeWidgetItem *item, const QString &path);
     void toggleLegendDisplay();
-    void StateChanged(const QString& state, int step);
     void initializeCharts();
     void updateTaskComboBox();
-    void populateStepItem(QTreeWidgetItem* stepItem, const Step& step, const QString& tableName);
-    void addWaveformsToTree(QTreeWidgetItem* parentItem, const std::vector<PXIe5320Waveform>& waveforms, int deviceType, const QString& tableName);
-    void addWaveforms8902ToTree(QTreeWidgetItem* parentItem, const std::vector<Data8902>& waveforms8902, const QString& tableName);
+    void populateStepItem(QTreeWidgetItem* stepItem, const Step& step, const QString& path);
+    void addWaveformsToTree(QTreeWidgetItem* parentItem, const std::vector<PXIe5320Waveform>& waveforms, int deviceType, const QString& path);
+    void addWaveforms8902ToTree(QTreeWidgetItem* parentItem, const std::vector<Data8902>& waveforms8902, const QString& path);
     void addWaveforms5711ToTree(QTreeWidgetItem* parentItem, const std::vector<PXIe5711Waveform>& waveforms5711);
     QTreeWidgetItem* createStepItem(const Step& step);
-    void addIRToTree(QTreeWidgetItem* parentItem, const Step& step, const QString& TableName);
-    QTreeWidgetItem* createIRItem(const QString& TableName, const QString& stepId);
+    void addIRToTree(QTreeWidgetItem* parentItem, const Step& step, const QString& path);
+    QTreeWidgetItem* createIRItem(const QString& path, const QString& stepId);
     void connectIRItem(QTreeWidgetItem* item);
-    void handleIRItemChange(const QString& tableName, const QString& stepId);
+    void handleIRItemChange(const QString& path, const int& stepId);
     void connectWaveformItem(QTreeWidgetItem* item);
     void handleWaveformItemChange(QTreeWidgetItem* item);
-    QTreeWidgetItem* createWaveformItem(const PXIe5320Waveform& waveform, const QString& tableName);
-    QTreeWidgetItem* createWaveform8902Item(const Data8902& waveform8902, const QString& tableName);
+    QTreeWidgetItem* createWaveformItem(const PXIe5320Waveform& waveform, const QString& path);
+    QTreeWidgetItem* createWaveform8902Item(const Data8902& waveform8902, const QString& path);
 
     void handlePlotExpand(QWidget*& plotWindow, UESTCQCustomPlot* customPlot, QLabel*& placeholderLabel, 
                                  QScrollBar* scrollBar, QGridLayout* gridLayout, const QString& title);
@@ -174,6 +165,8 @@ private:
     void handlePlotReparent(UESTCQCustomPlot* customPlot, QLabel*& placeholderLabel,
                                    QScrollBar* scrollBar, QGridLayout* gridLayout,
                                    QVBoxLayout* verticalLayout);
+    void InitalizeLED();
+    QMap<int, int> step_led_map;
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;

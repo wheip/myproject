@@ -16,9 +16,9 @@
 const QString AcquisitionManageDialog::DIGITAL_INPUT = "数字量输入";
 const QString AcquisitionManageDialog::ANALOG_INPUT = "模拟量输入";
 const QString AcquisitionManageDialog::MULTIMETER_INPUT = "万用表";
-const QStringList AcquisitionManageDialog::TEST_TYPES = {"current", "voltage", "resistance"};
+const QStringList AcquisitionManageDialog::TEST_TYPES = {"DC voltage", "DC current", "DC resistance", "AC voltage", "AC current", "AC resistance"};
 
-AcquisitionManageDialog::AcquisitionManageDialog(const QString& stepId, const QString& deviceId, QWidget *parent)
+AcquisitionManageDialog::AcquisitionManageDialog(const int& stepId, const int& deviceId, QWidget *parent)
     : QDialog(parent)
     , m_stepId(stepId)
     , m_deviceId(deviceId)
@@ -27,7 +27,7 @@ AcquisitionManageDialog::AcquisitionManageDialog(const QString& stepId, const QS
     
     // 加载设备图像和标签
     std::vector<Device> devices;
-    if (db->get_device("id = '" + deviceId + "'", devices, true) && !devices.empty()) {
+    if (db->get_device("id = '" + QString::number(deviceId) + "'", devices, true) && !devices.empty()) {
         deviceImage = QImage::fromData(devices[0].image);
     }
     
@@ -127,10 +127,10 @@ void AcquisitionManageDialog::setupUI()
 
 void AcquisitionManageDialog::loadAcquisitions()
 {
-    QString tableName = m_deviceId + "$$PXIe5320";
+    QString tableName = QString::number(m_deviceId) + "$$PXIe5320";
     std::vector<PXIe5320Waveform> acquisitions;
     
-    if (db->get_pxie5320waveform(tableName, "step_id = '" + m_stepId + "'", acquisitions)) {
+    if (db->get_pxie5320waveform(tableName, "step_id = '" + QString::number(m_stepId) + "'", acquisitions)) {
         m_acquisitions = QList<PXIe5320Waveform>(acquisitions.begin(), acquisitions.end());
         updateTable();
     }
@@ -138,7 +138,7 @@ void AcquisitionManageDialog::loadAcquisitions()
 
 void AcquisitionManageDialog::saveAcquisitions()
 {
-    QString tableName = m_deviceId + "$$PXIe5320";
+    QString tableName = QString::number(m_deviceId) + "$$PXIe5320";
     
     // 保存当前的采集端口记录
     for (const auto& acquisition : m_acquisitions) {
@@ -219,12 +219,12 @@ void AcquisitionManageDialog::addAcquisition()
             return;
         }
 
-        QString testType = testTypeComboBox->currentText();
+        PXIe8902_testtype testType = static_cast<PXIe8902_testtype>((testTypeComboBox->currentIndex()) % 3);
 
         Data8902 newData;
-        newData.id = QString("%1_%2_%3").arg(m_stepId).arg(DEVICE_8902).arg(testType);
         newData.step_id = m_stepId;
         newData.test_type = testType;
+        newData.model = testTypeComboBox->currentText().contains("DC");
         newData.positive_connect_location = 0;
         newData.negative_connect_location = 0;
         
@@ -239,7 +239,6 @@ void AcquisitionManageDialog::addAcquisition()
     }
 
     PXIe5320Waveform newAcquisition;
-    newAcquisition.id = QString("%1_%2_%3").arg(m_stepId).arg(QString::number(getDeviceFromInputType(inputTypeComboBox->currentText()))).arg(QString::number(portComboBox->currentData().toInt()));
     newAcquisition.step_id = m_stepId;
     newAcquisition.device = getDeviceFromInputType(inputTypeComboBox->currentText());
     newAcquisition.port = portComboBox->currentData().toInt();
@@ -265,8 +264,8 @@ void AcquisitionManageDialog::deleteAcquisition()
     if (row >= m_acquisitions.size()) {
         // 删除万用表数据
         int data8902Index = row - m_acquisitions.size();
-        QString id = m_data8902List[data8902Index].id;
-        QString tableName = m_deviceId + "$$PXIe8902";
+        int id = m_data8902List[data8902Index].id;
+        QString tableName = QString::number(m_deviceId) + "$$PXIe8902";
         if (db->delete_8902data(tableName, id)) {
             m_data8902List.removeAt(data8902Index);
         } else {
@@ -275,8 +274,8 @@ void AcquisitionManageDialog::deleteAcquisition()
         }
     } else {
         // 删除 PXIe5320 数据
-        QString id = m_acquisitions[row].id;
-        QString tableName = m_deviceId + "$$PXIe5320";
+        int id = m_acquisitions[row].id;
+        QString tableName = QString::number(m_deviceId) + "$$PXIe5320";
         m_acquisitions.removeAt(row);
         if (!db->delete_pxie5320waveform(tableName, id)) {
             QMessageBox::warning(this, "错误", "删除采集端口失败");
@@ -324,7 +323,7 @@ void AcquisitionManageDialog::updateTable()
     for (const auto& data : m_data8902List) {
         QTableWidgetItem *idItem = new QTableWidgetItem(data.id);
         QTableWidgetItem *deviceItem = new QTableWidgetItem(QString::number(DEVICE_8902));
-        QTableWidgetItem *typeItem = new QTableWidgetItem(data.test_type);
+        QTableWidgetItem *typeItem = new QTableWidgetItem(data.model ? "DC " + PXIe8902_testtype_to_string(data.test_type) : "AC " + PXIe8902_testtype_to_string(data.test_type));
         QTableWidgetItem *positiveItem = new QTableWidgetItem(QString::number(data.positive_connect_location));
         QTableWidgetItem *negativeItem = new QTableWidgetItem(QString::number(data.negative_connect_location));
         
@@ -348,8 +347,8 @@ void AcquisitionManageDialog::updateTable()
 
 void AcquisitionManageDialog::load8902Data()
 {
-    QString tableName = m_deviceId + "$$PXIe8902";
-    QString condition = "step_id = '" + m_stepId + "'";
+    QString tableName = QString::number(m_deviceId) + "$$PXIe8902";
+    QString condition = "step_id = '" + QString::number(m_stepId) + "'";
     
     std::vector<Data8902> data8902Vector;
     if (db->get_8902data(tableName, condition, data8902Vector)) {
@@ -360,7 +359,7 @@ void AcquisitionManageDialog::load8902Data()
 
 void AcquisitionManageDialog::save8902Data()
 {
-    QString tableName = m_deviceId + "$$PXIe8902";
+    QString tableName = QString::number(m_deviceId) + "$$PXIe8902";
     
     for (const auto& data : m_data8902List) {
         if (!db->update_8902data(tableName, data)) {

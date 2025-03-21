@@ -14,6 +14,10 @@ CONFIG += c++17
 
 SOURCES += \
     FolderCheck.cpp \
+    TestTask/jydevice.cpp \
+    TestTask/jydevicemanager.cpp \
+    TestTask/runtask.cpp \
+    TestTask/savedata.cpp \
     ch340.cpp \
     InfraredCamera/irimagedisplay.cpp \
     PCB_Components_Detect/labelediting.cpp \
@@ -54,6 +58,10 @@ SOURCES += \
 
 HEADERS += \
     FolderCheck.h \
+    TestTask/jydevice.h \
+    TestTask/jydevicemanager.h \
+    TestTask/runtask.h \
+    TestTask/savedata.h \
     ch340.h \
     IconImage.h \
     InfraredCamera/irimagedisplay.h \
@@ -98,13 +106,11 @@ HEADERS += \
 
 FORMS += \
     PCB_Components_Detect/pcbcomponentsdetect.ui \
+    TestTask/jydevice.ui \
     TestTask/managetask.ui \
     TestTask/taskconnectwire.ui \
     camera/detectcamera.ui \
-    InfraredCamera/camera.ui \
     mainwindow.ui \
-    PXIe5711/PXIe5711.ui \
- \#    PXIe5320/PXIe5320.ui 
     Detect_Devices/createdevicedialog.ui \
     Detect_Devices/devicemanager.ui
 

@@ -22,7 +22,7 @@ FolderCheck::~FolderCheck() {
     }
 }
 
-void FolderCheck::Check_Folder(QString device_id)
+void FolderCheck::Check_Folder(int device_id)
 {
     FolderTask task;
     task.device_id = device_id;
@@ -64,11 +64,11 @@ void FolderCheck::ProcessTask(const FolderTask& task)
             QDir().mkpath("./IMAGE");
         }
 
-        Database db("FolderCheck_" + task.device_id, nullptr);
+        Database db("FolderCheck_" + QString::number(task.device_id), nullptr);
 
         // 获取设备
         std::vector<Device> devices;
-        if(task.device_id != "") {
+        if(task.device_id != -1) {
             Device device;
             device.id = task.device_id;
             devices.push_back(device);
@@ -91,9 +91,9 @@ void FolderCheck::ProcessTask(const FolderTask& task)
             }
 
             QStringList paths;
-            paths << "./CollectData/" + device.id;
+            paths << "./CollectData/" + QString::number(device.id);
             for(const auto& task : testtasks) {
-                paths << "./CollectData/" + device.id + "/" + task.id;
+                paths << "./CollectData/" + QString::number(device.id) + "/" + task.id;
             }
 
             for(const auto& path : paths) {

@@ -41,7 +41,7 @@
      <x>0</x>
      <y>0</y>
      <width>2168</width>
-     <height>24</height>
+     <height>30</height>
     </rect>
    </property>
    <widget class="QMenu" name="menu">
@@ -71,8 +71,15 @@
     <addaction name="actionautodetect"/>
     <addaction name="menulistselect"/>
    </widget>
+   <widget class="QMenu" name="menu_divice">
+    <property name="title">
+     <string>仪器控制</string>
+    </property>
+    <addaction name="actiontdevice"/>
+   </widget>
    <addaction name="menu"/>
    <addaction name="menu_selectdevice"/>
+   <addaction name="menu_divice"/>
   </widget>
   <action name="actionPCBshibie">
    <property name="text">
@@ -127,6 +134,11 @@
   <action name="actionjty">
    <property name="text">
     <string>jty</string>
+   </property>
+  </action>
+  <action name="actiontdevice">
+   <property name="text">
+    <string>测试</string>
    </property>
   </action>
  </widget>

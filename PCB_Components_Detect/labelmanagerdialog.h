@@ -21,7 +21,7 @@ public:
     // 构造函数：只需传入图片和设备id
     explicit LabelManagerDialog(QWidget *parent,
                                 const QImage &image,
-                                const QString &deviceId,
+                                const int &deviceId,
                                 const std::vector<Label> &Addlabels);
     ~LabelManagerDialog();
 

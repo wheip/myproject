@@ -108,7 +108,7 @@ void DeviceManager::onPdSearchClicked()
     int row = 0;
     ui->tableWidget_devices->setRowCount(static_cast<int>(devices.size()));
     for (const auto& dev : devices) {
-        ui->tableWidget_devices->setItem(row, 0, new QTableWidgetItem(dev.id));
+        ui->tableWidget_devices->setItem(row, 0, new QTableWidgetItem(QString::number(dev.id)));
         QString deviceName = QString::fromUtf8(dev.device_name);
         ui->tableWidget_devices->setItem(row, 1, new QTableWidgetItem(deviceName));
         QString imageStatus = dev.image.isEmpty() ? "无图片" : "有图片";
@@ -116,7 +116,7 @@ void DeviceManager::onPdSearchClicked()
         
         QPushButton *btnDelete = new QPushButton("删除");
         ui->tableWidget_devices->setCellWidget(row, 3, btnDelete);
-        QString deviceId = dev.id;
+        int deviceId = dev.id;
         connect(btnDelete, &QPushButton::clicked, this, [this, deviceId](){
             Database db("deleteConnection", this);
             QString errorMessage;
@@ -166,17 +166,17 @@ void DeviceManager::on_tableWidget_devices_cellDoubleClicked(int row, int column
     }
 
     std::vector<Label> labelInfoAdd;
-    LabelManagerDialog dlg(this, image, deviceId, labelInfoAdd);
+    LabelManagerDialog dlg(this, image, deviceId.toInt(), labelInfoAdd);
     if(dlg.exec() == QDialog::Accepted){
          LabelChanges changes = dlg.getLabelChanges();
          QString ErrorMessage;
-         if(!db.update_deviceelement(deviceId, changes.updatedLabels, ErrorMessage)){
+         if(!db.update_deviceelement(deviceId.toInt(), changes.updatedLabels, ErrorMessage)){
             QMessageBox::warning(this, "错误", "更新设备标签失败: " + ErrorMessage);
          }
-         if(!db.insert_deviceelement(deviceId, changes.insertedLabels, ErrorMessage)){
+         if(!db.insert_deviceelement(deviceId.toInt(), changes.insertedLabels, ErrorMessage)){
             QMessageBox::warning(this, "错误", "插入设备标签失败: " + ErrorMessage);
          }
-         if(!db.delete_deviceelement(deviceId, changes.deletedIds, ErrorMessage)){
+         if(!db.delete_deviceelement(deviceId.toInt(), changes.deletedIds, ErrorMessage)){
             QMessageBox::warning(this, "错误", "删除设备标签失败: " + ErrorMessage);
          }
     }
@@ -184,6 +184,7 @@ void DeviceManager::on_tableWidget_devices_cellDoubleClicked(int row, int column
 
 void DeviceManager::onPbAddDeviceClicked()
 {
+    int deviceId = -1;
     CreateDeviceDialog createDeviceDialog(this);
     if(createDeviceDialog.exec() == QDialog::Accepted) {
         Device device = createDeviceDialog.getDevice();
@@ -193,6 +194,7 @@ void DeviceManager::onPbAddDeviceClicked()
         if(!db.insert_device(device, errorMessage)) {
             QMessageBox::warning(this, "错误", "添加设备失败：" + errorMessage);
         } else {
+            QList<QMap<QString, QVariant>> resId = db.selectQuery("SELECT LAST_INSERT_ID() as id");
             QMessageBox::information(this, "成功", "设备添加成功");
             
             // 清空当前表格
@@ -201,14 +203,14 @@ void DeviceManager::onPbAddDeviceClicked()
             
             // 只显示新添加的设备
             ui->tableWidget_devices->setRowCount(1);
-            ui->tableWidget_devices->setItem(0, 0, new QTableWidgetItem(device.id));
+            ui->tableWidget_devices->setItem(0, 0, new QTableWidgetItem(QString::number(resId[0]["id"].toInt())));
             ui->tableWidget_devices->setItem(0, 1, new QTableWidgetItem(QString::fromUtf8(device.device_name)));
             ui->tableWidget_devices->setItem(0, 2, new QTableWidgetItem(device.image.isEmpty() ? "无图片" : "有图片"));
             
             // 添加删除按钮
             QPushButton *btnDelete = new QPushButton("删除");
             ui->tableWidget_devices->setCellWidget(0, 3, btnDelete);
-            QString deviceId = device.id;
+            deviceId = resId[0]["id"].toInt();
             connect(btnDelete, &QPushButton::clicked, this, [this, deviceId](){
                 Database db("deleteConnection", this);
                 QString errorMessage;
@@ -220,7 +222,7 @@ void DeviceManager::onPbAddDeviceClicked()
             });
         }
         
-        if(!db.insert_deviceelement(device.id, deviceLabels, errorMessage)){
+        if(!db.insert_deviceelement(deviceId, deviceLabels, errorMessage)){
             QMessageBox::warning(this, "错误", "添加设备标签失败：" + errorMessage);
         }
     }

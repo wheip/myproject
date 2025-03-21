@@ -13,7 +13,7 @@
 
 // 定义任务结构体
 struct FolderTask {
-    QString device_id;
+    int device_id = -1;
     std::promise<std::pair<bool, std::string>> promise;
 };
 
@@ -30,7 +30,7 @@ public:
 
     ~FolderCheck();
 
-    void Check_Folder(QString device_id = "");
+    void Check_Folder(int device_id);
 
     bool Delete_Folder(QString path);
 

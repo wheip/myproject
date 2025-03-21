@@ -13,6 +13,9 @@
 #include <algorithm>
 #include <QFuture>
 #include <QFutureWatcher>
+#include <QDateTime>
+#include <queue>
+#include <QPair>
 
 class UESTCQCustomPlot : public QCustomPlot
 {
@@ -32,6 +35,9 @@ public:
     void removeLine(std::vector<QCPGraph*> graphs);
     void setHorizontalScrollBar(QScrollBar* scrollBar);
     void replot(QCustomPlot::RefreshPriority refreshPriority = QCustomPlot::rpQueuedReplot);
+
+    QCPGraph* addRealTimeLine(const QString& name);
+    void updateRealTimeLines(QVector<QCPGraph*> graphs, QVector<QList<double>> data);
 
 private slots:
     void onXRangeChanged(const QCPRange &range);
@@ -78,6 +84,7 @@ private:
 
     QCPItemText* legendToggleButton;
     bool isLegendExpanded;
+    int lastIndex = 0;
 
     QMutex dataAccessMutex;
 };

@@ -1,7 +1,6 @@
 #ifndef PXIE5320_H
 #define PXIE5320_H
 #include <QtCore/QTimer>
-#include <QMessageBox>
 #include <QObject>
 #include <QtCharts/QChartView>
 #include <QtCore/QTimer>
@@ -11,8 +10,16 @@
 #include "ClassList.h"
 #include <iostream>
 #include <mutex>
+#include <condition_variable>
 
 using namespace std;
+
+// 设备状态枚举
+enum class PXIe5320Status {
+    Closed,     // 关闭
+    Ready,      // 准备
+    Running     // 运行
+};
 
 class PXIe5320 : public QObject 
 {
@@ -22,7 +29,15 @@ public:
     ~PXIe5320();
 
     int cardID;
-    void DeviceClose();
+
+    bool continueAcquisition = false;
+    
+    // 获取当前设备状态
+    PXIe5320Status getStatus() const { std::lock_guard<std::mutex> lock(mtx); return m_status; }
+
+    QString getErrorMessage() const { std::lock_guard<std::mutex> lock(mtx); return errorMsg; }
+
+    bool SelfTest();
 
 signals:
     void signalAcquisitionData(const std::vector<PXIe5320Waveform> collectdata, int serial_number);
@@ -32,16 +47,24 @@ signals:
     void DeviceReady();
 
     void StateChanged(const QString& state, int numb);
+
 public slots:
     bool StartAcquisition(std::vector<PXIe5320Waveform> collectdata, double collecttime);
 
     void InterruptAcquisition();
 
-    void SendSoftTrigger();
+    bool SendSoftTrigger();
+
+    void DeviceClose();
 
 private:
-    std::mutex mtx;
-    bool isStarted = false;          ///< flag of start status
+    mutable std::mutex mtx;
+    std::condition_variable cv;  // 用于暂停/恢复线程
+    bool isStarted = false;      // 设备是否启动
+    bool shouldExit = false;     // 线程是否最终退出（析构时使用）
+    bool paused = false;         // 线程是否暂停（设备关闭时置为 true）
+    PXIe5320Status m_status = PXIe5320Status::Closed; // 设备状态
+    
     unsigned int channelCount;
     std::unique_ptr<unsigned char[]> pChannels;
     std::unique_ptr<double[]> pRangeLow;
@@ -53,6 +76,7 @@ private:
     JY5320_DeviceHandle hDevice = nullptr;  ///< device handle
     int BandWidth = 0;
     QString errorMsg;
+    QThread* fetchThread = nullptr;
 
     vector<vector<float>> AcqData;
     int slotNumber;   ///< slot number
@@ -72,6 +96,9 @@ private:
     void updatadisplay(std::vector<PXIe5320Waveform> &collectdata);
     void FetchData();
     void handleError();
+    
+    // 更新设备状态并发送信号
+    void updateStatus(PXIe5320Status status);
 };
 
 #endif // PXIE5320_H

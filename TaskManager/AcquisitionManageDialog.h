@@ -15,7 +15,7 @@ class AcquisitionManageDialog : public QDialog
 {
     Q_OBJECT
 public:
-    explicit AcquisitionManageDialog(const QString& stepId, const QString& deviceId, QWidget *parent = nullptr);
+    explicit AcquisitionManageDialog(const int& stepId, const int& deviceId, QWidget *parent = nullptr);
 
 private slots:
     void addAcquisition();
@@ -26,8 +26,8 @@ private slots:
     void showConnectionLocationDialog(int row, int column);
 
 private:
-    QString m_stepId;
-    QString m_deviceId;  // 存储设备ID
+    int m_stepId;
+    int m_deviceId;  // 存储设备ID
     QTableWidget *tableWidget;
     QComboBox *portComboBox;      // 端口选择下拉框
     QComboBox *inputTypeComboBox; // 输入类型选择下拉框

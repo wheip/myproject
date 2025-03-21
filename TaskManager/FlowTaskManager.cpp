@@ -231,7 +231,7 @@ void FlowTaskManager::createNewTask()
     // 检查任务ID是否已存在
     std::vector<TestTask> existingTasks;
     QString errorMsg;
-    QString tableName = deviceId + "$$TestTask";
+    QString tableName = QString::number(deviceId) + "$$TestTask";
     if (db->get_testtask(tableName, "id = '" + taskId + "'", existingTasks, errorMsg) && 
         !existingTasks.empty()) {
         QMessageBox::warning(this, "错误", "任务ID已存在，请使用其他ID");
@@ -276,7 +276,6 @@ void FlowTaskManager::addNewStep()
     
     // 设置步骤节点的 Step 数据
     newStep->stepData.test_task_id = currentTaskId;
-    newStep->stepData.id = QString("%1_%2").arg(currentTaskId).arg(stepCount);
     newStep->stepData.step_number = stepCount;
     newStep->stepData.collecttime = 10;
     newStep->stepData.continue_step = false;
@@ -286,15 +285,15 @@ void FlowTaskManager::addNewStep()
     connect(newStep, &FlowNode::nodeDeleted, this, &FlowTaskManager::handleNodeDeleted);
     connect(newStep, &FlowNode::nodeRunRequested, this, &FlowTaskManager::handleNodeRun);
     
-    // 将新节点直接追加到容器中（保持顺序为先创建的在前）
-    stepNodes.append(newStep);
     
     // 保存新步骤到数据库
-    QString stepTableName = deviceId + "$$Step";
+    QString stepTableName = QString::number(deviceId) + "$$Step";
     if (!db->insert_step(stepTableName, newStep->stepData)) {
         QMessageBox::warning(this, "错误", "保存步骤失败");
     }
-    
+    int stepId = db->query.lastInsertId().toInt();
+    newStep->stepData.id = stepId;
+    stepNodes.append(newStep);
     drawFlowChart();
 }
 
@@ -355,7 +354,7 @@ void FlowTaskManager::handleNodeDeleted(FlowNode* node)
         scene->removeItem(node);
     }
     // 删除数据库中对应的步骤记录
-    QString stepTableName = deviceId + "$$Step";
+    QString stepTableName = QString::number(deviceId) + "$$Step";
     QString errorMsg;
     if (!db->delete_step(stepTableName, node->stepData.id, errorMsg)) {
         QMessageBox::warning(this, "错误", "删除步骤失败: " + errorMsg);
@@ -393,7 +392,7 @@ void FlowTaskManager::handleNodeRun(FlowNode* node)
         node->updateConnectorStyle(); // 直接调用更新函数，立即刷新连接线样式
 
         // 保存到数据库
-        QString stepTableName = deviceId + "$$Step";
+        QString stepTableName = QString::number(deviceId) + "$$Step";
         if (!db->update_step(stepTableName, node->stepData)) {
             QMessageBox::warning(this, "错误", "保存步骤失败");
         }
@@ -410,7 +409,7 @@ void FlowTaskManager::updateTaskList()
     taskListCombo->clear();
     std::vector<TestTask> tasks;
     QString errorMsg;
-    QString tableName = deviceId + "$$TestTask";
+    QString tableName = QString::number(deviceId) + "$$TestTask";
     
     QString condition = currentElementId > 0 ? 
         QString("element_id = %1").arg(currentElementId) : "";
@@ -432,7 +431,7 @@ void FlowTaskManager::loadTaskFromDatabase()
     
     // 加载步骤
     std::vector<Step> steps;
-    QString stepTableName = deviceId + "$$Step";
+    QString stepTableName = QString::number(deviceId) + "$$Step";
     if (db->get_step(stepTableName, "test_task_id = '" + currentTaskId + "'", steps)) {
         // 按步骤号排序
         std::sort(steps.begin(), steps.end(), 
@@ -461,7 +460,7 @@ void FlowTaskManager::saveCurrentTask()
     if (currentTaskId.isEmpty()) return;
     
     QString errorMsg;
-    QString testTaskTableName = deviceId + "$$TestTask";
+    QString testTaskTableName = QString::number(deviceId) + "$$TestTask";
     
     // 保存任务
     TestTask task;
@@ -482,7 +481,7 @@ void FlowTaskManager::deleteCurrentTask()
     if (currentTaskId.isEmpty()) return;
     
     QString errorMsg;
-    QString testTaskTableName = deviceId + "$$TestTask";
+    QString testTaskTableName = QString::number(deviceId) + "$$TestTask";
     
     if (db->delete_testtask(testTaskTableName, currentTaskId, errorMsg)) {
         clearFlowChart();
@@ -493,7 +492,7 @@ void FlowTaskManager::deleteCurrentTask()
     }
 }
 
-void FlowTaskManager::onDeviceIdChanged(const QString& newDeviceId)
+void FlowTaskManager::onDeviceIdChanged(const int& newDeviceId)
 {
     deviceId = newDeviceId;
     updateTaskList();
@@ -504,7 +503,7 @@ void FlowTaskManager::showSelectComponentDialog()
 {
     // 从数据库加载设备图像和标签
     std::vector<Device> devices;
-    if (db->get_device("id = '" + deviceId + "'", devices, true) && !devices.empty()) {
+    if (db->get_device("id = '" + QString::number(deviceId) + "'", devices, true) && !devices.empty()) {
         QImage deviceImage = QImage::fromData(devices[0].image);
         
         QString errorMsg;

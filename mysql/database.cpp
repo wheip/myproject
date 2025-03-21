@@ -2,21 +2,29 @@
 #include <QDebug>
 #include <QMessageBox>
 #include <QFile>
+#include <QSqlQuery>
+#include <QSqlError>
+#include <QSqlRecord>
+#include <QThread>
 
 // 构造函数
 Database::Database(const QString& connectionName, QWidget *parent)
     : connectionName(connectionName)
     , parent(parent)
 {
-    if (!connect()) {
-        QMessageBox::critical(parent, "错误", "无法连接到数据库: " + db.lastError().text(), QMessageBox::Ok);
+    if(!connect()){
+        qDebug() << "数据库连接失败!";
     }
 }
 
 // 析构函数
 Database::~Database()
 {
-    disconnect();
+    if(db.isOpen()){
+        db.close();
+    }
+    QString connectionName = db.connectionName();
+    QSqlDatabase::removeDatabase(connectionName);
 }
 
 // 连接数据库
@@ -41,6 +49,14 @@ bool Database::connect()
     if (!query.exec("SET NAMES 'GBK'")) {
         QMessageBox::critical(parent, "错误", "设置字符集错误: " + query.lastError().text(), QMessageBox::Ok);
         return false;
+    }
+    
+    if(!query.exec("SHOW  TABLES LIKE 'devices'")){
+        if(!query.exec("CREATE TABLE devices (id INT AUTO_INCREMENT PRIMARY KEY, device_name VARCHAR(50), device_driver_Voltage DOUBLE, device_driver_Current DOUBLE, device_driver_Power DOUBLE, image LONGBLOB)ENGINE=InnoDB;"))
+        {
+            QMessageBox::critical(parent, "错误", "无法创建表: " + query.lastError().text(), QMessageBox::Ok);
+            return false;
+        }
     }
 
     return true;
@@ -85,8 +101,7 @@ bool Database::insert_device(const Device& device, QString& ErrorMessage)
     QString imagePath;
 
     // 数据库中不存储图片路径
-    query.prepare("INSERT INTO devices (id, device_name, device_driver_Voltage, device_driver_Current, device_driver_Power, image) VALUES (:id, :device_name, :device_driver_Voltage, :device_driver_Current, :device_driver_Power, :image)");
-    query.bindValue(":id", device.id);
+    query.prepare("INSERT INTO devices (device_name, device_driver_Voltage, device_driver_Current, device_driver_Power, image) VALUES (:device_name, :device_driver_Voltage, :device_driver_Current, :device_driver_Power, :image)");
     query.bindValue(":device_name", device.device_name);
     query.bindValue(":device_driver_Voltage", device.device_driver_Voltage);
     query.bindValue(":device_driver_Current", device.device_driver_Current);
@@ -98,44 +113,45 @@ bool Database::insert_device(const Device& device, QString& ErrorMessage)
         return false;
     }
     
-    QString device_elementTableName = device.id + "$$DeviceElement";
-    query.prepare("CREATE TABLE " + device_elementTableName + "(id INT AUTO_INCREMENT PRIMARY KEY, label BLOB, device_id VARCHAR(50) NOT NULL, point_x DOUBLE NOT NULL, point_y DOUBLE NOT NULL, width DOUBLE NOT NULL, height DOUBLE NOT NULL, position_number VARCHAR(50), notes BLOB, FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE)ENGINE=InnoDB;");
+    int device_id = query.lastInsertId().toInt();
+    QString device_elementTableName = QString::number(device_id) + "$$DeviceElement";
+    query.prepare("CREATE TABLE " + device_elementTableName + "(id INT AUTO_INCREMENT PRIMARY KEY, label BLOB, device_id INT NOT NULL, point_x DOUBLE NOT NULL, point_y DOUBLE NOT NULL, width DOUBLE NOT NULL, height DOUBLE NOT NULL, position_number VARCHAR(50), notes BLOB, FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE)ENGINE=InnoDB;");
     if (!query.exec()) {
         ErrorMessage = query.lastError().text();
         return false;
     }
-    QString testTaskTableName = device.id + "$$TestTask";
-    query.prepare("CREATE TABLE " + testTaskTableName + "(id VARCHAR(50) PRIMARY KEY, element_id INT NOT NULL, connection_image_data LONGBLOB, FOREIGN KEY (element_id) REFERENCES " + device.id + "$$DeviceElement(id) ON DELETE CASCADE)ENGINE=InnoDB;");
+    QString testTaskTableName = QString::number(device_id)  + "$$TestTask";
+    query.prepare("CREATE TABLE " + testTaskTableName + "(id VARCHAR(50) PRIMARY KEY, element_id INT NOT NULL, connection_image_data LONGBLOB, FOREIGN KEY (element_id) REFERENCES " + QString::number(device_id) + "$$DeviceElement(id) ON DELETE CASCADE)ENGINE=InnoDB;");
     if (!query.exec()) {
         ErrorMessage = query.lastError().text();
         return false;
     }
-    QString stepTableName = device.id + "$$Step";
-    query.prepare("CREATE TABLE " + stepTableName + "(id VARCHAR(50) PRIMARY KEY, test_task_id VARCHAR(50) NOT NULL, collecttime DOUBLE NOT NULL, step_number INT NOT NULL, continue_step TINYINT(1), isthermometry TINYINT(1), thermometry_pause_time DOUBLE, FOREIGN KEY (test_task_id) REFERENCES " + testTaskTableName + "(id) ON DELETE CASCADE)ENGINE=InnoDB;");
+    QString stepTableName = QString::number(device_id)  + "$$Step";
+    query.prepare("CREATE TABLE " + stepTableName + "(id INT AUTO_INCREMENT PRIMARY KEY, test_task_id VARCHAR(50) NOT NULL, collecttime DOUBLE NOT NULL, step_number INT NOT NULL, continue_step TINYINT(1), isthermometry TINYINT(1), thermometry_pause_time DOUBLE, FOREIGN KEY (test_task_id) REFERENCES " + testTaskTableName + "(id) ON DELETE CASCADE)ENGINE=InnoDB;");
     if (!query.exec()) {
         ErrorMessage = query.lastError().text();
         return false;
     }
-    QString pxie5711TableName = device.id + "$$PXIe5711";
-    query.prepare("CREATE TABLE " + pxie5711TableName + "(id VARCHAR(50) PRIMARY KEY, step_id VARCHAR(50) NOT NULL, channel INT NOT NULL, waveform_type VARCHAR(50) NOT NULL, amplitude DOUBLE NOT NULL, frequency DOUBLE NOT NULL, dutyCycle DOUBLE NOT NULL, positive_connect_location INT, negative_connect_location INT, FOREIGN KEY (step_id) REFERENCES " + stepTableName + "(id) ON DELETE CASCADE)ENGINE=InnoDB;");
+    QString pxie5711TableName = QString::number(device_id)  + "$$PXIe5711";
+    query.prepare("CREATE TABLE " + pxie5711TableName + "(id INT AUTO_INCREMENT PRIMARY KEY, step_id INT NOT NULL, channel INT NOT NULL, waveform_type INT NOT NULL, amplitude DOUBLE NOT NULL, frequency DOUBLE NOT NULL, dutyCycle DOUBLE NOT NULL, positive_connect_location INT, negative_connect_location INT, FOREIGN KEY (step_id) REFERENCES " + stepTableName + "(id) ON DELETE CASCADE)ENGINE=InnoDB;");
     if (!query.exec()) {
         ErrorMessage = query.lastError().text();
         return false;
     }
-    QString pxie5320TableName = device.id + "$$PXIe5320";
-    query.prepare("CREATE TABLE " + pxie5320TableName + "(id VARCHAR(50) PRIMARY KEY, step_id VARCHAR(50) NOT NULL, device INT NOT NULL, port INT NOT NULL, data LONGBLOB, positive_connect_location INT, negative_connect_location INT, FOREIGN KEY (step_id) REFERENCES " + stepTableName + "(id) ON DELETE CASCADE)ENGINE=InnoDB;");
+    QString pxie5320TableName = QString::number(device_id)  + "$$PXIe5320";
+    query.prepare("CREATE TABLE " + pxie5320TableName + "(id INT AUTO_INCREMENT PRIMARY KEY, step_id INT NOT NULL, device INT NOT NULL, port INT NOT NULL, data LONGBLOB, positive_connect_location INT, negative_connect_location INT, FOREIGN KEY (step_id) REFERENCES " + stepTableName + "(id) ON DELETE CASCADE)ENGINE=InnoDB;");
     if (!query.exec()) {
         ErrorMessage = query.lastError().text();
         return false;
     }
-    QString imageTableName = device.id + "$$image";
-    query.prepare("CREATE TABLE " + imageTableName + "(id VARCHAR(50) PRIMARY KEY, step_id VARCHAR(50) NOT NULL, task_table_name VARCHAR(50) NOT NULL, device VARCHAR(50) NOT NULL, image_data LONGBLOB NOT NULL, temp_data LONGBLOB, temp_width DOUBLE, temp_height DOUBLE, FOREIGN KEY (step_id) REFERENCES " + stepTableName + "(id) ON DELETE CASCADE)ENGINE=InnoDB;");
+    QString imageTableName = QString::number(device_id)  + "$$image";
+    query.prepare("CREATE TABLE " + imageTableName + "(id INT AUTO_INCREMENT PRIMARY KEY, step_id INT NOT NULL, task_table_name VARCHAR(50) NOT NULL, image_data LONGBLOB NOT NULL, temp_data LONGBLOB, temp_width DOUBLE, temp_height DOUBLE, FOREIGN KEY (step_id) REFERENCES " + stepTableName + "(id) ON DELETE CASCADE)ENGINE=InnoDB;");
     if (!query.exec()) {
         ErrorMessage = query.lastError().text();
         return false;
     }
-    QString pxie8902TableName = device.id + "$$PXIe8902";
-    query.prepare("CREATE TABLE " + pxie8902TableName + "(id VARCHAR(50) PRIMARY KEY, step_id VARCHAR(50) NOT NULL, test_type VARCHAR(50) NOT NULL, positive_connect_location INT, negative_connect_location INT, FOREIGN KEY (step_id) REFERENCES " + stepTableName + "(id) ON DELETE CASCADE)ENGINE=InnoDB;");
+    QString pxie8902TableName = QString::number(device_id)  + "$$PXIe8902";
+    query.prepare("CREATE TABLE " + pxie8902TableName + "(id INT AUTO_INCREMENT PRIMARY KEY, step_id INT NOT NULL, model TINYINT(1) NOT NULL, test_type INT NOT NULL, positive_connect_location INT, negative_connect_location INT, FOREIGN KEY (step_id) REFERENCES " + stepTableName + "(id) ON DELETE CASCADE)ENGINE=InnoDB;");
     if (!query.exec()) {
         ErrorMessage = query.lastError().text();
         return false;
@@ -143,7 +159,7 @@ bool Database::insert_device(const Device& device, QString& ErrorMessage)
 
     // 保存图片到文件系统
     if (!device.image.isEmpty()) {
-        imagePath = "./IMAGE/" + device.id + ".jpg";
+        imagePath = "./IMAGE/" + QString::number(device_id) + ".jpg";
         QFile file(imagePath);
         if (!file.open(QIODevice::WriteOnly)) {
             ErrorMessage = "无法创建图片文件: " + file.errorString();
@@ -183,14 +199,14 @@ bool Database::get_device(const QString& condition, std::vector<Device>& devices
 
     while (query.next()) {
         Device device;
-        device.id = query.value("id").toString();
+        device.id = query.value("id").toInt();
         device.device_name = query.value("device_name").toByteArray();
         device.device_driver_Voltage = query.value("device_driver_Voltage").toDouble();
         device.device_driver_Current = query.value("device_driver_Current").toDouble();
         device.device_driver_Power = query.value("device_driver_Power").toDouble();
         
         if (includeImage) {
-            QString imagePath = "./IMAGE/" + device.id + ".jpg";
+            QString imagePath = "./IMAGE/" + QString::number(device.id) + ".jpg";
             if (QFile::exists(imagePath)) {
                 QFile file(imagePath);
                 if (file.open(QIODevice::ReadOnly)) {
@@ -228,7 +244,7 @@ bool Database::update_device(const Device& device, QString& ErrorMessage, bool i
     if(includeImage && !device.image.isEmpty())
     {
         // 保存新图片
-        QString imagePath = "./IMAGE/" + device.id + ".jpg";
+        QString imagePath = "./IMAGE/" + QString::number(device.id) + ".jpg";
         QFile file(imagePath);
         if (!file.open(QIODevice::WriteOnly)) {
             ErrorMessage = "无法创建图片文件: " + file.errorString();
@@ -238,7 +254,7 @@ bool Database::update_device(const Device& device, QString& ErrorMessage, bool i
         file.close();
 
         try{
-            if(SIFT_MATCHER.removeFromDatabase(std::string(device.id.toStdString())))
+            if(SIFT_MATCHER.removeFromDatabase(std::to_string(device.id).c_str()))
             {
                 std::vector<std::string> imageFiles;
                 imageFiles.push_back(imagePath.toStdString());
@@ -255,7 +271,7 @@ bool Database::update_device(const Device& device, QString& ErrorMessage, bool i
     return true;
 }
 
-bool Database::delete_device(const QString& id, QString& ErrorMessage)
+bool Database::delete_device(const int& id, QString& ErrorMessage)
 {
 
     query.exec("SET FOREIGN_KEY_CHECKS = 0;");
@@ -268,7 +284,7 @@ bool Database::delete_device(const QString& id, QString& ErrorMessage)
     }
 
     std::vector<QString> TableNames;
-    QString condition = id + "$$%";
+    QString condition = QString::number(id) + "$$%";
     if (!get_table_name(condition, TableNames)) {
         ErrorMessage = query.lastError().text();
         query.exec("SET FOREIGN_KEY_CHECKS = 1;");
@@ -287,10 +303,10 @@ bool Database::delete_device(const QString& id, QString& ErrorMessage)
     query.exec("SET FOREIGN_KEY_CHECKS = 1;");
 
     // 删除图片文件
-    QString imagePath = "./IMAGE/" + id + ".jpg";
+    QString imagePath = "./IMAGE/" + QString::number(id) + ".jpg";
     if (QFile::exists(imagePath)) {
         QFile::remove(imagePath);
-        if(!SIFT_MATCHER.removeFromDatabase(std::string(id.toStdString())))
+        if(!SIFT_MATCHER.removeFromDatabase(std::to_string(id).c_str()))
         {
             ErrorMessage = "无法删除SIFT数据库中的图片: " + id;
         }
@@ -299,9 +315,9 @@ bool Database::delete_device(const QString& id, QString& ErrorMessage)
 }
 
 // 对 DeviceElement 表的增删改查函数
-bool Database::insert_deviceelement(const QString& device_id, const std::vector<Label>& labels, QString& ErrorMessage)
+bool Database::insert_deviceelement(const int& device_id, const std::vector<Label>& labels, QString& ErrorMessage)
 {
-    QString sql = "INSERT INTO " + device_id + "$$DeviceElement" + " (label, device_id, point_x, point_y, width, height, position_number, notes) VALUES ";
+    QString sql = "INSERT INTO " + QString::number(device_id) + "$$DeviceElement" + " (label, device_id, point_x, point_y, width, height, position_number, notes) VALUES ";
     QStringList valueStrings;
     for(auto &label : labels)
     {
@@ -325,9 +341,9 @@ bool Database::insert_deviceelement(const QString& device_id, const std::vector<
     return true;
 }
 
-bool Database::get_deviceelement(const QString& device_id, const QString& condition, std::vector<Label>& labels, QString& ErrorMessage)
+bool Database::get_deviceelement(const int& device_id, const QString& condition, std::vector<Label>& labels, QString& ErrorMessage)
 {
-    QString sqlQuery = "SELECT * FROM " + device_id + "$$DeviceElement";
+    QString sqlQuery = "SELECT * FROM " + QString::number(device_id) + "$$DeviceElement";
     if (!condition.isEmpty()) {
         sqlQuery += " WHERE " + condition;
     }
@@ -351,13 +367,13 @@ bool Database::get_deviceelement(const QString& device_id, const QString& condit
     return true;
 }
 
-bool Database::update_deviceelement(const QString& device_id, const std::vector<Label>& labels, QString& ErrorMessage)
+bool Database::update_deviceelement(const int& device_id, const std::vector<Label>& labels, QString& ErrorMessage)
 {
     for(auto &label : labels)
     {
         QByteArray label_data = label.label.toUtf8();
         QString updateQuery = QString("UPDATE %1$$DeviceElement SET label = ?, point_x = ?, point_y = ?, width = ?, height = ?, position_number = ?, notes = ? WHERE id = ?")
-                             .arg(device_id);
+                             .arg(QString::number(device_id));
         query.prepare(updateQuery);
         query.addBindValue(label_data);
         query.addBindValue(label.point_x);
@@ -376,7 +392,7 @@ bool Database::update_deviceelement(const QString& device_id, const std::vector<
     return true;
 }
 
-bool Database::delete_deviceelement(const QString& device_id, const std::vector<int>& ids, QString& ErrorMessage)
+bool Database::delete_deviceelement(const int& device_id, const std::vector<int>& ids, QString& ErrorMessage)
 {
     if(ids.empty())
     {
@@ -387,13 +403,13 @@ bool Database::delete_deviceelement(const QString& device_id, const std::vector<
     for(auto &id : ids)
     {
         std::vector<TestTask> testtasks;
-        get_testtask(device_id + "$$TestTask", "element_id = " + QString::number(id), testtasks, ErrorMessage);
+        get_testtask(QString::number(device_id) + "$$TestTask", "element_id = " + QString::number(id), testtasks, ErrorMessage);
         if(!testtasks.empty())
         {
             qDebug() << "删除设备元素" << id << "关联的 TestTask 数据" << testtasks.size() << "个";
             for(auto &testtask : testtasks)
             {
-                delete_testtask(device_id + "$$TestTask", testtask.id, ErrorMessage);
+                delete_testtask(QString::number(device_id) + "$$TestTask", testtask.id, ErrorMessage);
             }
         }
     }
@@ -406,7 +422,7 @@ bool Database::delete_deviceelement(const QString& device_id, const std::vector<
     }
     
     // 使用prepare和bindValue来避免SQL注入和语法错误
-    QString tableName = device_id + "$$DeviceElement";
+    QString tableName = QString::number(device_id) + "$$DeviceElement";
     QString deleteQuery = "DELETE FROM " + tableName + " WHERE id IN (" + idList + ")";
     query.prepare(deleteQuery);
 
@@ -428,20 +444,20 @@ bool Database::delete_deviceelement(const QString& device_id, const std::vector<
     return true;
 }
 
-bool Database::delete_all_deviceelement(const QString& device_id, QString& ErrorMessage)
+bool Database::delete_all_deviceelement(const int& device_id, QString& ErrorMessage)
 {
     std::vector<TestTask> testtasks;
-    get_testtask(device_id + "$$TestTask", "", testtasks, ErrorMessage);
+    get_testtask(QString::number(device_id) + "$$TestTask", "", testtasks, ErrorMessage);
     for(auto &testtask : testtasks)
     {
-        delete_testtask(device_id + "$$TestTask", testtask.id, ErrorMessage);
+        delete_testtask(QString::number(device_id) + "$$TestTask", testtask.id, ErrorMessage);
     }
-    query.prepare("DELETE FROM " + device_id + "$$DeviceElement");
+    query.prepare("DELETE FROM " + QString::number(device_id) + "$$DeviceElement");
     if (!query.exec()) {
         ErrorMessage = query.lastError().text();
         return false;
     }
-    query.prepare("ALTER TABLE " + device_id + "$$DeviceElement AUTO_INCREMENT = 1");
+    query.prepare("ALTER TABLE " + QString::number(device_id) + "$$DeviceElement AUTO_INCREMENT = 1");
     if (!query.exec()) {
         ErrorMessage = query.lastError().text();
         return false;
@@ -559,8 +575,7 @@ bool Database::delete_TestDate(const QString& tableName, QString& ErrorMessage)
 // 对 Step 表的增删改查函数
 bool Database::insert_step(const QString& tableName, const Step& step)
 {
-    query.prepare("INSERT INTO " + tableName + " (id, test_task_id, step_number, collecttime, continue_step, isthermometry, thermometry_pause_time) VALUES (:id, :test_task_id, :step_number, :collecttime, :continue_step, :isthermometry, :thermometry_pause_time)");
-    query.bindValue(":id", step.id);
+    query.prepare("INSERT INTO " + tableName + " (test_task_id, step_number, collecttime, continue_step, isthermometry, thermometry_pause_time) VALUES (:test_task_id, :step_number, :collecttime, :continue_step, :isthermometry, :thermometry_pause_time)");
     query.bindValue(":test_task_id", step.test_task_id);
     query.bindValue(":step_number", step.step_number);
     query.bindValue(":collecttime", step.collecttime);
@@ -587,7 +602,7 @@ bool Database::get_step(const QString& tableName, const QString& condition, std:
     }
     while (query.next()) {
         Step step;
-        step.id = query.value("id").toString();
+        step.id = query.value("id").toInt();
         step.test_task_id = query.value("test_task_id").toString();
         step.step_number = query.value("step_number").toInt();
         step.collecttime = query.value("collecttime").toDouble();
@@ -625,16 +640,16 @@ bool Database::update_step(const QString& tableName, const Step& step)
     return true;
 }
 
-bool Database::delete_step(const QString& tableName, const QString& id, QString& ErrorMessage)
+bool Database::delete_step(const QString& tableName, const int& id, QString& ErrorMessage)
 {
-    qDebug() << "删除 Step 数据: " + id;
+    qDebug() << "删除 Step 数据: " + QString::number(id);
     query.prepare("DELETE FROM " + tableName + " WHERE id = :id");
     query.bindValue(":id", id);
     if (!query.exec()) {
         ErrorMessage = query.lastError().text();
         return false;
     }
-    qDebug() << "删除 Step 数据成功: " + id;
+    qDebug() << "删除 Step 数据成功: " + QString::number(id);
     return true;
 }
 
@@ -642,13 +657,12 @@ bool Database::delete_step(const QString& tableName, const QString& id, QString&
 bool Database::insert_pxie5711waveform(const QString& tableName, const PXIe5711Waveform& waveform)
 {
     query.prepare("INSERT INTO " + tableName + 
-        " (id, step_id, channel, waveform_type, amplitude, frequency, dutyCycle, positive_connect_location, negative_connect_location) "
-        "VALUES (:id, :step_id, :channel, :waveform_type, :amplitude, :frequency, :dutyCycle, :positive_connect_location, :negative_connect_location)");
+        " (step_id, channel, waveform_type, amplitude, frequency, dutyCycle, positive_connect_location, negative_connect_location) "
+        "VALUES (:step_id, :channel, :waveform_type, :amplitude, :frequency, :dutyCycle, :positive_connect_location, :negative_connect_location)");
     
-    query.bindValue(":id", waveform.id);
     query.bindValue(":step_id", waveform.step_id);
     query.bindValue(":channel", waveform.channel);
-    query.bindValue(":waveform_type", waveform.waveform_type);
+    query.bindValue(":waveform_type", static_cast<int>(waveform.waveform_type));
     query.bindValue(":amplitude", waveform.amplitude);
     query.bindValue(":frequency", waveform.frequency);
     query.bindValue(":dutyCycle", waveform.dutyCycle);
@@ -675,10 +689,10 @@ bool Database::get_pxie5711waveform(const QString& tableName, const QString& con
     }
     while (query.next()) {
         PXIe5711Waveform waveform;
-        waveform.id = query.value("id").toString();
-        waveform.step_id = query.value("step_id").toString();
+        waveform.id = query.value("id").toInt();
+        waveform.step_id = query.value("step_id").toInt();
         waveform.channel = query.value("channel").toInt();
-        waveform.waveform_type = query.value("waveform_type").toString();
+        waveform.waveform_type = static_cast<PXIe5711_testtype>(query.value("waveform_type").toInt());
         waveform.amplitude = query.value("amplitude").toDouble();
         waveform.frequency = query.value("frequency").toDouble();
         waveform.dutyCycle = query.value("dutyCycle").toDouble();
@@ -707,7 +721,7 @@ bool Database::update_pxie5711waveform(const QString& tableName, const PXIe5711W
     
     query.bindValue(":step_id", waveform.step_id);
     query.bindValue(":channel", waveform.channel);
-    query.bindValue(":waveform_type", waveform.waveform_type);
+    query.bindValue(":waveform_type", static_cast<int>(waveform.waveform_type));
     query.bindValue(":amplitude", waveform.amplitude);
     query.bindValue(":frequency", waveform.frequency);
     query.bindValue(":dutyCycle", waveform.dutyCycle);
@@ -722,7 +736,7 @@ bool Database::update_pxie5711waveform(const QString& tableName, const PXIe5711W
     return true;
 }
 
-bool Database::delete_pxie5711waveform(const QString& tableName, const QString& id)
+bool Database::delete_pxie5711waveform(const QString& tableName, const int& id)
 {
     query.prepare("DELETE FROM " + tableName + " WHERE id = :id");
     query.bindValue(":id", id);
@@ -737,10 +751,9 @@ bool Database::delete_pxie5711waveform(const QString& tableName, const QString& 
 bool Database::insert_pxie5320waveform(const QString& tableName, const PXIe5320Waveform& waveform)
 {
     query.prepare("INSERT INTO " + tableName + 
-        " (id, step_id, device, port, data, positive_connect_location, negative_connect_location) "
-        "VALUES (:id, :step_id, :device, :port, :data, :positive_connect_location, :negative_connect_location)");
+        " (step_id, device, port, data, positive_connect_location, negative_connect_location) "
+        "VALUES (:step_id, :device, :port, :data, :positive_connect_location, :negative_connect_location)");
     
-    query.bindValue(":id", waveform.id);
     query.bindValue(":step_id", waveform.step_id);
     query.bindValue(":device", waveform.device);
     query.bindValue(":port", waveform.port);
@@ -769,8 +782,8 @@ bool Database::get_pxie5320waveform(const QString& tableName, const QString& con
     }
     while (query.next()) {
         PXIe5320Waveform waveform;
-        waveform.id = query.value("id").toString();
-        waveform.step_id = query.value("step_id").toString();
+        waveform.id = query.value("id").toInt();
+        waveform.step_id = query.value("step_id").toInt();
         waveform.device = query.value("device").toInt();
         waveform.port = query.value("port").toInt();
         QByteArray byteArray = query.value("data").toByteArray();
@@ -814,7 +827,7 @@ bool Database::update_pxie5320waveform(const QString& tableName, const PXIe5320W
     return true;
 }
 
-bool Database::delete_pxie5320waveform(const QString& tableName, const QString& id)
+bool Database::delete_pxie5320waveform(const QString& tableName, const int& id)
 {
     query.prepare("DELETE FROM " + tableName + " WHERE id = :id");
     query.bindValue(":id", id);
@@ -827,10 +840,10 @@ bool Database::delete_pxie5320waveform(const QString& tableName, const QString& 
 
 bool Database::insert_8902data(const QString& tableName, const Data8902& data)
 {
-    query.prepare("INSERT INTO " + tableName + " (id, step_id, test_type, positive_connect_location, negative_connect_location) VALUES (:id, :step_id, :test_type, :positive_connect_location, :negative_connect_location)");
-    query.bindValue(":id", data.id);
+    query.prepare("INSERT INTO " + tableName + " (step_id, model, test_type, positive_connect_location, negative_connect_location) VALUES (:step_id, :model, :test_type, :positive_connect_location, :negative_connect_location)");
     query.bindValue(":step_id", data.step_id);
-    query.bindValue(":test_type", data.test_type);
+    query.bindValue(":model", data.model);
+    query.bindValue(":test_type", static_cast<int>(data.test_type));
     query.bindValue(":positive_connect_location", data.positive_connect_location);
     query.bindValue(":negative_connect_location", data.negative_connect_location);
     if (!query.exec()) {
@@ -853,9 +866,10 @@ bool Database::get_8902data(const QString& tableName, const QString& condition, 
     }
     while (query.next()) {
         Data8902 data;
-        data.id = query.value("id").toString();
-        data.step_id = query.value("step_id").toString();
-        data.test_type = query.value("test_type").toString();
+        data.id = query.value("id").toInt();
+        data.step_id = query.value("step_id").toInt();
+        data.model = query.value("model").toBool();
+        data.test_type = static_cast<PXIe8902_testtype>(query.value("test_type").toInt());
         data.positive_connect_location = query.value("positive_connect_location").toInt();
         data.negative_connect_location = query.value("negative_connect_location").toInt();
         datas.push_back(data);
@@ -863,7 +877,7 @@ bool Database::get_8902data(const QString& tableName, const QString& condition, 
     return true;
 }
 
-bool Database::delete_8902data(const QString& tableName, const QString& id)
+bool Database::delete_8902data(const QString& tableName, const int& id)
 {
     query.prepare("DELETE FROM " + tableName + " WHERE id = :id");
     query.bindValue(":id", id);
@@ -884,8 +898,9 @@ bool Database::update_8902data(const QString& tableName, const Data8902& data)
         return false;
     }
 
-    query.prepare("UPDATE " + tableName + " SET test_type = :test_type, positive_connect_location = :positive_connect_location, negative_connect_location = :negative_connect_location WHERE id = :id");
-    query.bindValue(":test_type", data.test_type);
+    query.prepare("UPDATE " + tableName + " SET test_type = :test_type, model = :model, positive_connect_location = :positive_connect_location, negative_connect_location = :negative_connect_location WHERE id = :id");
+    query.bindValue(":test_type", static_cast<int>(data.test_type));
+    query.bindValue(":model", data.model);
     query.bindValue(":positive_connect_location", data.positive_connect_location);
     query.bindValue(":negative_connect_location", data.negative_connect_location);
     query.bindValue(":id", data.id);
@@ -898,7 +913,7 @@ bool Database::update_8902data(const QString& tableName, const Data8902& data)
 
 bool Database::Build_5320data_table(const QString& TableName)
 {
-    query.prepare("CREATE TABLE IF NOT EXISTS " + TableName + " (id VARCHAR(50) PRIMARY KEY, serial_number INT, waveformid VARCHAR(50), data LONGBLOB)");
+    query.prepare("CREATE TABLE IF NOT EXISTS " + TableName + " (id INT AUTO_INCREMENT PRIMARY KEY, serial_number INT, waveformid INT, data LONGBLOB)");
     if(!query.exec())
     {
         qDebug() << "无法创建 " + TableName + " 表: " + query.lastError().text();
@@ -945,9 +960,9 @@ bool Database::get_5320data(const QString& tableName, const QString& condition, 
     }
     while (query.next()) {
         Data5320 data;
-        data.id = query.value("id").toString();
+        data.id = query.value("id").toInt();
         data.serial_number = query.value("serial_number").toInt();
-        data.waveform_id = query.value("waveformid").toString();
+        data.waveform_id = query.value("waveformid").toInt();
         QByteArray byteArray = QByteArray::fromBase64(query.value("data").toByteArray());
         QVector<float> floatVector(byteArray.size() / sizeof(float));
         memcpy(floatVector.data(), byteArray.data(), byteArray.size());
@@ -1046,11 +1061,9 @@ bool Database::loadCSVFile(const QString& filePath, const QString& tableName)
 // 对 Image 表的增删改查函数
 bool Database::insert_image(const QString& tableName, const Image& image, QString& ErrorMessage)
 {
-    query.prepare("INSERT INTO " + tableName + " (id, step_id, task_table_name, device, image_data, temp_data, temp_width, temp_height) VALUES (:id, :step_id, :task_table_name, :device, :image_data, :temp_data, :temp_width, :temp_height)");
-    query.bindValue(":id", image.id);
+    query.prepare("INSERT INTO " + tableName + " (step_id, task_table_name, image_data, temp_data, temp_width, temp_height) VALUES (:step_id, :task_table_name, :image_data, :temp_data, :temp_width, :temp_height)");
     query.bindValue(":step_id", image.step_id);
     query.bindValue(":task_table_name", image.task_table_name);
-    query.bindValue(":device", image.device);
     query.bindValue(":image_data", image.image_data);
     query.bindValue(":temp_data", image.temp_data);
     query.bindValue(":temp_width", image.temp_width);
@@ -1075,10 +1088,9 @@ bool Database::get_image(const QString& tableName, const QString& condition, std
     }
     while (query.next()) {
         Image image;
-        image.id = query.value("id").toString();
-        image.step_id = query.value("step_id").toString();
+        image.id = query.value("id").toInt();
+        image.step_id = query.value("step_id").toInt();
         image.task_table_name = query.value("task_table_name").toString();
-        image.device = query.value("device").toString();
         image.image_data = query.value("image_data").toByteArray();
         image.temp_data = query.value("temp_data").toByteArray();
         image.temp_width = query.value("temp_width").toInt();
@@ -1090,10 +1102,9 @@ bool Database::get_image(const QString& tableName, const QString& condition, std
 
 bool Database::update_image(const QString& tableName, const Image& image)
 {
-    query.prepare("UPDATE " + tableName + " SET step_id = :step_id, task_table_name = :task_table_name, device = :device, image_data = :image_data, temp_data = :temp_data, temp_width = :temp_width, temp_height = :temp_height WHERE id = :id");
+    query.prepare("UPDATE " + tableName + " SET step_id = :step_id, task_table_name = :task_table_name, image_data = :image_data, temp_data = :temp_data, temp_width = :temp_width, temp_height = :temp_height WHERE id = :id");
     query.bindValue(":step_id", image.step_id);
     query.bindValue(":task_table_name", image.task_table_name);
-    query.bindValue(":device", image.device);
     query.bindValue(":image_data", image.image_data);
     query.bindValue(":temp_data", image.temp_data);
     query.bindValue(":temp_width", image.temp_width);
@@ -1108,31 +1119,37 @@ bool Database::update_image(const QString& tableName, const Image& image)
 
 bool Database::delete_image(const QString& tableName, const QString& condition)
 {
-    // 检查condition是否包含等号,如果包含则需要用引号包裹值
-    QString finalCondition;
-    if(condition.contains("=")) {
-        QStringList parts = condition.split("=");
-        if(parts.length() == 2) {
-            QString field = parts[0].trimmed();
-            QString value = parts[1].trimmed();
-            // 如果值不是纯数字,需要加引号
-            bool isNumber = false;
-            value.toInt(&isNumber);
-            if(!isNumber) {
-                finalCondition = field + "= '" + value + "'";
-            } else {
-                finalCondition = condition;
-            }
-        }
-    } else {
-        finalCondition = condition;
-    }
-
-    query.prepare("DELETE FROM " + tableName + " WHERE " + finalCondition);
-    qDebug() << "删除 Image 数据: " + tableName + " " + finalCondition;
+    query.prepare("DELETE FROM " + tableName + " WHERE " + condition);
     if (!query.exec()) {
         QMessageBox::critical(parent, "错误", "无法删除 Image 数据: " + query.lastError().text(), QMessageBox::Ok);
         return false;
     }
     return true;
 }
+
+QList<QMap<QString, QVariant>> Database::selectQuery(const QString &queryStr)
+{
+    QList<QMap<QString, QVariant>> results;
+
+    if (!db.isOpen()) {
+        qDebug() << "数据库未打开!";
+        return results;
+    }
+
+    QSqlQuery query(db);
+    if (!query.exec(queryStr)) {
+        qDebug() << "查询 SQL 语句错误:" << query.lastError().text();
+        return results;
+    }
+
+    while (query.next()) {
+        QMap<QString, QVariant> row;
+        QSqlRecord record = query.record();
+        for (int i = 0; i < record.count(); i++) {
+            row.insert(record.fieldName(i), query.value(i));
+        }
+        results.append(row);
+    }
+
+    return results;
+} 

@@ -8,27 +8,18 @@
 #include <QtConcurrent>
 
 extern bool taskisexecuting;
-extern QString current_device_id;
+extern int current_device_id;
 
 ManageTask::ManageTask(QMainWindow *parent)
     : parent(parent)
     , ui(new Ui::ManageTask)
     , database("managetask", this)
-    , infraredcamera(Camera::getInstance(nullptr, true))
     , device_id(current_device_id)
 {
     ui->setupUi(this);
-    
-    stackedWidget_connectwire = new QStackedWidget(this);
-    
-    taskConnectWire = std::make_shared<TaskConnectWire>(this, stackedWidget_connectwire);
-    taskConnectWire->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
-    stackedWidget_connectwire->addWidget(taskConnectWire.get());
-
-    stackedWidget_connectwire->addWidget(ui->widget_2);
-    stackedWidget_connectwire->setCurrentIndex(1);
-    ui->gridLayout_wireconnect->addWidget(stackedWidget_connectwire, 0, 0);
+    runTask = new RunTask();
+    connect(runTask, &RunTask::StateChanged, this, &ManageTask::StateChanged);
     ComboBoxInit();
 
     irimagedisplay_temp = new IRImageDisplay(this);
@@ -38,11 +29,6 @@ ManageTask::ManageTask(QMainWindow *parent)
     ui->gridLayout_iconimage->addWidget(irimagedisplay, 0, 0);
     irimagedisplay_temp->show();
     irimagedisplay->show();
-    QObject::connect(&infraredcamera, &Camera::Image_rgb, this, &ManageTask::saveinfraredframe);
-    QObject::connect(&infraredcamera, &Camera::signal_close, this, [this]() {
-        is_infraredcamera_save = false;
-    });
-    QObject::connect(&infraredcamera, &Camera::Image_ir_hypertherm, this, &ManageTask::saveinfraredframe_hypertherm);
     QObject::connect(&gDeviceId, &DeviceId::deviceChanged, this, [this]() {
         device_id = gDeviceId.getDeviceId();
         on_pbrefresh_clicked();
@@ -102,7 +88,7 @@ void ManageTask::initializeCharts()
 void ManageTask::updateTaskComboBox()
 {
     std::vector<TestTask> tasks;
-    QString table_name = device_id + "$$TestTask";
+    QString table_name = QString::number(device_id) + "$$TestTask";
     QString ErrorMessage;
     if(!database.get_testtask(table_name, "element_id = " + QString::number(element_id), tasks, ErrorMessage))
     {
@@ -131,13 +117,13 @@ void ManageTask::setupTreeWidget(const std::vector<Step>& steps)
     ui->treeWidget->setColumnCount(5);
     ui->treeWidget->setHeaderLabels(QStringList() << tr("任务") << tr("测试时间") << tr("步骤") << tr("设备") << tr("端口"));
 
-    std::vector<QString> TableNames = g_FolderCheck.Get_Folder_list("./CollectData/" + device_id + "/" + currentTaskId);
-    
+    std::vector<QString> TaskList = g_FolderCheck.Get_Folder_list("./CollectData/" + QString::number(device_id) + "/" + currentTaskId);
+
     QTreeWidgetItem *rootItem = new QTreeWidgetItem(ui->treeWidget);
     rootItem->setText(0, currentTaskId);
     ui->treeWidget->addTopLevelItem(rootItem);
 
-    for (int i = 0; i < TableNames.size(); ++i)
+    for (int i = 0; i < TaskList.size(); ++i)
     {
         QTreeWidgetItem *timeItem = new QTreeWidgetItem(rootItem);
 
@@ -145,23 +131,23 @@ void ManageTask::setupTreeWidget(const std::vector<Step>& steps)
         if(i == 0)
         {
             displayText = "参考数据";
-            display_time_id_map[TableNames[i]] = displayText;
+            display_time_id_map[TaskList[i]] = displayText;
         }else{
             displayText = "测试数据" + QString::number(i);
-            display_time_id_map[TableNames[i]] = displayText;
+            display_time_id_map[TaskList[i]] = displayText;
         }
 
-        displayText = displayText + " " + "(" + TableNames[i] + ")";
+        displayText = displayText + " " + "(" + TaskList[i] + ")";
         timeItem->setText(1, displayText);
         timeItem->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsUserCheckable);
         timeItem->setCheckState(1, Qt::Unchecked);
-        setupStepContextMenu(timeItem, device_id + "/" + currentTaskId + "/" + TableNames[i]);
+        setupStepContextMenu(timeItem, QString::number(device_id) + "/" + currentTaskId + "/" + TaskList[i]);
 
         for (const auto& step : steps)
         {
             QTreeWidgetItem *stepItem = createStepItem(step);
             timeItem->addChild(stepItem);
-            populateStepItem(stepItem, step, device_id + "/" + currentTaskId + "/" + TableNames[i]);
+            populateStepItem(stepItem, step, QString::number(device_id) + "/" + currentTaskId + "/" + TaskList[i]);
         }
     }
 
@@ -212,17 +198,20 @@ void ManageTask::setupTreeWidget(const std::vector<Step>& steps)
     });
 }
 
-void ManageTask::setupStepContextMenu(QTreeWidgetItem *item, const QString &tableName)
+void ManageTask::setupStepContextMenu(QTreeWidgetItem *item, const QString &path)
 {
     item->treeWidget()->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(item->treeWidget(), &QTreeWidget::customContextMenuRequested, this, [this, item, tableName](const QPoint &pos) {
+    connect(item->treeWidget(), &QTreeWidget::customContextMenuRequested, this, [this, item, path](const QPoint &pos) {
         QTreeWidgetItem* selectedItem = item->treeWidget()->itemAt(pos);
         if (selectedItem && selectedItem == item) {
             QMenu contextMenu(tr("上下文菜单"), this);
             QAction *actionDelete = new QAction(tr("删除"), this);
             contextMenu.addAction(actionDelete);
-            connect(actionDelete, &QAction::triggered, this, [this, item, tableName]() {
-                if (g_FolderCheck.Delete_Folder("./CollectData/" + tableName)) {
+            connect(actionDelete, &QAction::triggered, this, [this, item, path]() {
+                if (g_FolderCheck.Delete_Folder("./CollectData/" + path)) {
+                    QString TableName = path.split("/")[0] + "$$image";
+                    QString task_table_name = path.split("/").last();
+                    database.delete_image(TableName, "task_table_name = '" + task_table_name + "'");
                     on_pbViewTask_clicked();
                 }
                 else{
@@ -238,20 +227,21 @@ QTreeWidgetItem* ManageTask::createStepItem(const Step& step)
 {
     QTreeWidgetItem *stepItem = new QTreeWidgetItem();
     stepItem->setText(2, tr("步骤%1 采样时间%2s").arg(step.step_number).arg(QString::number(step.collecttime)));
+    stepItem->setData(0, Qt::UserRole, QVariant::fromValue(step.step_number));
     stepItem->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsUserCheckable);
     stepItem->setCheckState(2, Qt::Unchecked);
     return stepItem;
 }
 
-void ManageTask::populateStepItem(QTreeWidgetItem* stepItem, const Step& step, const QString& TableName)
+void ManageTask::populateStepItem(QTreeWidgetItem* stepItem, const Step& step, const QString& path) //path = CollectData/divice_id/task_id/test_time
 {
     std::vector<PXIe5320Waveform> waveforms;
     std::vector<Data8902> waveforms8902;
 
-    QString table_name_pxie5320 = device_id + "$$PXIe5320";
-    database.get_pxie5320waveform(table_name_pxie5320, "step_id = '" + step.id + "'", waveforms);
-    QString table_name_pxie8902 = device_id + "$$PXIe8902";
-    database.get_8902data(table_name_pxie8902, "step_id = '" + step.id + "'", waveforms8902);
+    QString table_name_pxie5320 = QString::number(device_id) + "$$PXIe5320";
+    database.get_pxie5320waveform(table_name_pxie5320, "step_id = '" + QString::number(step.id) + "'", waveforms);
+    QString table_name_pxie8902 = QString::number(device_id) + "$$PXIe8902";
+    database.get_8902data(table_name_pxie8902, "step_id = '" + QString::number(step.id) + "'", waveforms8902);
 
     QTreeWidgetItem *pxie8902Item = new QTreeWidgetItem(stepItem, QStringList() << "" << "" << "" << "万用表");
     QTreeWidgetItem *pxie5322Item = new QTreeWidgetItem(stepItem, QStringList() << "" << "" << "" << "数字输入");
@@ -262,7 +252,7 @@ void ManageTask::populateStepItem(QTreeWidgetItem* stepItem, const Step& step, c
     pxie5322Item->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsUserCheckable);
     pxie5323Item->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsUserCheckable);
     irItem->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsUserCheckable);
-    irItem->setData(0, Qt::UserRole, QVariant::fromValue(QPair<QString, QString>(step.id, TableName)));
+    irItem->setData(0, Qt::UserRole, QVariant::fromValue(QPair<int, QString>(step.id, path)));
 
 
     pxie8902Item->setCheckState(3, Qt::Unchecked);
@@ -271,9 +261,9 @@ void ManageTask::populateStepItem(QTreeWidgetItem* stepItem, const Step& step, c
     irItem->setCheckState(3, Qt::Unchecked);
 
 
-    addWaveformsToTree(pxie5322Item, waveforms, 5322, TableName);
-    addWaveformsToTree(pxie5323Item, waveforms, 5323, TableName);
-    addWaveforms8902ToTree(pxie8902Item, waveforms8902, TableName);
+    addWaveformsToTree(pxie5322Item, waveforms, 5322, path + "/5322");
+    addWaveformsToTree(pxie5323Item, waveforms, 5323, path + "/5323");
+    addWaveforms8902ToTree(pxie8902Item, waveforms8902, path + "/8902");
     connectIRItem(irItem);
 }
 
@@ -283,25 +273,25 @@ void ManageTask::connectIRItem(QTreeWidgetItem* item)
         if (changedItem == item && column == 3) {
             if(changedItem->checkState(column) == Qt::Checked)
             {
-                QString tableName = item->data(0, Qt::UserRole).value<QPair<QString, QString>>().second;
-                QString stepId = item->data(0, Qt::UserRole).value<QPair<QString, QString>>().first;
-                handleIRItemChange(tableName, stepId);
+                QString path = item->data(0, Qt::UserRole).value<QPair<int, QString>>().second;
+                int stepId = item->data(0, Qt::UserRole).value<QPair<int, QString>>().first;
+                handleIRItemChange(path, stepId);
             }
         }
     });
 }
 
-void ManageTask::handleIRItemChange(const QString& tableName, const QString& stepId)
+void ManageTask::handleIRItemChange(const QString& path, const int& stepId)
 {
-    QString table_name_irimage = tableName.split("/")[0] + "$$image";
+    QString table_name_irimage = path.split("/")[0] + "$$image";
     QString ErrorMessage;
     std::vector<Image> irimage;
-    if(display_time_id_map[tableName.split("/")[2]].contains("参考数据"))
+    if(display_time_id_map[path.split("/")[2]].contains("参考数据"))
         irimagedisplay_temp->clear();
     else
         irimagedisplay->clear();
-    QString table_name = tableName.split("/")[1] + "_" + tableName.split("/")[2];
-    if(!database.get_image(table_name_irimage, "task_table_name = '" + table_name + "' AND step_id = '" + stepId + "'", irimage, ErrorMessage))
+    QString table_name = path.split("/").last();
+    if(!database.get_image(table_name_irimage, "task_table_name = '" + table_name + "' AND step_id = '" + QString::number(stepId) + "'", irimage, ErrorMessage))
     {
         QMessageBox::warning(this, "红外图像查询失败", ErrorMessage);
         return;
@@ -310,7 +300,7 @@ void ManageTask::handleIRItemChange(const QString& tableName, const QString& ste
     QImage qimage = QImage::fromData(irimage[0].image_data);
     std::vector<uint16_t> tempVector(reinterpret_cast<uint16_t*>(irimage[0].temp_data.data()),
                                                  reinterpret_cast<uint16_t*>(irimage[0].temp_data.data() + irimage[0].temp_data.size()));
-    if(display_time_id_map[tableName.split("/")[2]].contains("参考数据"))
+    if(display_time_id_map[path.split("/")[2]].contains("参考数据"))
     {
         irimagedisplay_temp->setImage(qimage, tempVector, irimage[0].temp_width, irimage[0].temp_height);
     }
@@ -320,46 +310,46 @@ void ManageTask::handleIRItemChange(const QString& tableName, const QString& ste
     }
 }
 
-void ManageTask::addWaveformsToTree(QTreeWidgetItem* parentItem, const std::vector<PXIe5320Waveform>& waveforms, int deviceType, const QString& TableName)
+void ManageTask::addWaveformsToTree(QTreeWidgetItem* parentItem, const std::vector<PXIe5320Waveform>& waveforms, int deviceType, const QString& path)
 {
     for(const auto& waveform : waveforms)
     {
         if(waveform.device == deviceType)
         {
-            QTreeWidgetItem *waveformItem = createWaveformItem(waveform, TableName);
+            QTreeWidgetItem *waveformItem = createWaveformItem(waveform, path + "/" + QString::number(waveform.id) + ".mmap"); //file path
             parentItem->addChild(waveformItem);
             connectWaveformItem(waveformItem);
         }
     }
 }
 
-void ManageTask::addWaveforms8902ToTree(QTreeWidgetItem* parentItem, const std::vector<Data8902>& waveforms8902, const QString& TableName)
+void ManageTask::addWaveforms8902ToTree(QTreeWidgetItem* parentItem, const std::vector<Data8902>& waveforms8902, const QString& path)
 {
     for(const auto& waveform : waveforms8902)
     {
-        QTreeWidgetItem *waveformItem = createWaveform8902Item(waveform, TableName);
+        QTreeWidgetItem *waveformItem = createWaveform8902Item(waveform, path + "/" + QString::number(waveform.id) + ".mmap");
         parentItem->addChild(waveformItem);
         connectWaveformItem(waveformItem);
     }
 }
 
-QTreeWidgetItem* ManageTask::createWaveformItem(const PXIe5320Waveform& waveform, const QString& tableName)
+QTreeWidgetItem* ManageTask::createWaveformItem(const PXIe5320Waveform& waveform, const QString& path)
 {
     QTreeWidgetItem *waveformItem = new QTreeWidgetItem();
     waveformItem->setText(4, tr("通道%1").arg(waveform.port));
     waveformItem->setFlags(waveformItem->flags() | Qt::ItemIsUserCheckable);
     waveformItem->setCheckState(4, Qt::Unchecked);
-    waveformItem->setData(0, Qt::UserRole, QVariant::fromValue(QPair<QString, QString>(waveform.id, tableName)));
+    waveformItem->setData(0, Qt::UserRole, QVariant::fromValue(QPair<int, QString>(waveform.device, path)));
     return waveformItem;
 }
 
-QTreeWidgetItem* ManageTask::createWaveform8902Item(const Data8902& waveform, const QString& tableName)
+QTreeWidgetItem* ManageTask::createWaveform8902Item(const Data8902& waveform, const QString& path)
 {
     QTreeWidgetItem *waveformItem = new QTreeWidgetItem();
-    waveformItem->setText(4, tr(waveform.test_type.toStdString().c_str()));
+    waveformItem->setText(4, (PXIe8902_testtype_to_string(waveform.test_type)));
     waveformItem->setFlags(waveformItem->flags() | Qt::ItemIsUserCheckable);
     waveformItem->setCheckState(4, Qt::Unchecked);
-    waveformItem->setData(0, Qt::UserRole, QVariant::fromValue(QPair<QString, QString>(waveform.id, tableName)));
+    waveformItem->setData(0, Qt::UserRole, QVariant::fromValue(QPair<int, QString>(8902, path)));
     return waveformItem;
 }
 
@@ -376,9 +366,10 @@ void ManageTask::handleWaveformItemChange(QTreeWidgetItem* item)
 {
     // 禁用勾选框直到数据加载完成
     item->setFlags(item->flags() & ~Qt::ItemIsUserCheckable);
-    QString waveformId = item->data(0, Qt::UserRole).value<QPair<QString, QString>>().first;
-    QString tableName = item->data(0, Qt::UserRole).value<QPair<QString, QString>>().second;
-    int deviceType = waveformId.split("_").at(waveformId.split("_").size() - 2).toInt();
+    int deviceType = item->data(0, Qt::UserRole).value<QPair<int, QString>>().first;
+    QString path = item->data(0, Qt::UserRole).value<QPair<int, QString>>().second;
+    QString stepNumber = QString::number(item->parent()->parent()->data(0, Qt::UserRole).value<int>());
+    QString port = item->text(4);
     if (item->checkState(4) == Qt::Checked) {
         int serial_number = 0;
         if(deviceType == 5322)
@@ -394,42 +385,18 @@ void ManageTask::handleWaveformItemChange(QTreeWidgetItem* item)
             serial_number = 0;
         }
 
-        displayWaveform(waveformId, tableName, deviceType);
+        displayWaveform(path, deviceType, stepNumber, port);
     } else {
-        undisplayWaveform(waveformId, tableName, deviceType);
+        undisplayWaveform(path, deviceType);
     }
     item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
 }
 
-void ManageTask::undisplayWaveform(const QString& waveformid, const QString& tableName, const int deviceType)
+void ManageTask::displayWaveform(const QString& path, const int& deviceType, const QString& stepNumber, const QString& port)
 {
-    if(path_graph_map.find(tableName.split("/")[2] + "_" + waveformid) == path_graph_map.end()) return;
-    if(deviceType == 5322)
-    {
-        std::vector<QCPGraph*> graphs = {path_graph_map[tableName.split("/")[2] + "_" + waveformid]};
-        customPlot5322->removeLine(graphs);
-        graph5322.erase(std::remove(graph5322.begin(), graph5322.end(), path_graph_map[tableName.split("/")[2] + "_" + waveformid]), graph5322.end());
-    }
-    else if(deviceType == 5323)
-    {
-        std::vector<QCPGraph*> graphs = {path_graph_map[tableName.split("/")[2] + "_" + waveformid]};
-        customPlot5323->removeLine(graphs);
-        graph5323.erase(std::remove(graph5323.begin(), graph5323.end(), path_graph_map[tableName.split("/")[2] + "_" + waveformid]), graph5323.end());
-    }else if(deviceType == 8902)
-    {
-        std::vector<QCPGraph*> graphs = {path_graph_map[tableName.split("/")[2] + "_" + waveformid]};
-        customPlot8902->removeLine(graphs);
-        graph8902.erase(std::remove(graph8902.begin(), graph8902.end(), path_graph_map[tableName.split("/")[2] + "_" + waveformid]), graph8902.end());
-    }
-    path_graph_map.erase(tableName.split("/")[2] + "_" + waveformid);
-}
+    if(path_graph_map.find(path) != path_graph_map.end()) return;
 
-void ManageTask::displayWaveform(const QString& waveformid, const QString& path, const int deviceType)
-{
-    if(path_graph_map.find(path.split("/")[2] + "_" + waveformid) != path_graph_map.end()) return;
-    QString filepath = "./CollectData/" + path + "/" + QString::number(deviceType) + "/" + waveformid + ".mmap";
-
-    if(!QFile::exists(filepath))
+    if(!QFile::exists("./CollectData/" + path))
     {
         QMessageBox::warning(this, "文件不存在", "文件不存在");
         return;
@@ -437,91 +404,85 @@ void ManageTask::displayWaveform(const QString& waveformid, const QString& path,
 
     if(deviceType == 5322)
     {
-        auto* newGraph = customPlot5322->addLine(filepath);
-        newGraph->setName(display_time_id_map[path.split("/")[2]] + "  步骤" + waveformid.split("_").at(waveformid.split("_").size() - 3) + ":" + "端口" + waveformid.split("_").last());
-        path_graph_map[path.split("/")[2] + "_" + waveformid] = newGraph;
+        auto* newGraph = customPlot5322->addLine("./CollectData/" + path);
+        newGraph->setName(display_time_id_map[path.split("/")[2]] + "  步骤" + stepNumber + ":" + port);
+        path_graph_map[path] = newGraph;
         graph5322.push_back(newGraph);
     }
     else if(deviceType == 5323)
     {
-        auto* newGraph = customPlot5323->addLine(filepath);
-        newGraph->setName(display_time_id_map[path.split("/")[2]] + "  步骤" + waveformid.split("_").at(waveformid.split("_").size() - 3) + ":" + "端口" + waveformid.split("_").last());
-        path_graph_map[path.split("/")[2] + "_" + waveformid] = newGraph;
+        auto* newGraph = customPlot5323->addLine("./CollectData/" + path);
+        newGraph->setName(display_time_id_map[path.split("/")[2]] + "  步骤" + stepNumber + ":" + port);
+        path_graph_map[path] = newGraph;
         graph5323.push_back(newGraph);
     }else if(deviceType == 8902)
     {
-        auto* newGraph = customPlot8902->addLine(filepath);
-        newGraph->setName(display_time_id_map[path.split("/")[2]] + "  步骤" + waveformid.split("_").at(waveformid.split("_").size() - 3) + ":" + "类型" + waveformid.split("_").last());
-        path_graph_map[path.split("/")[2] + "_" + waveformid] = newGraph;
+        auto* newGraph = customPlot8902->addLine("./CollectData/" + path);
+        newGraph->setName(display_time_id_map[path.split("/")[2]] + "  步骤" + stepNumber + ":" + port);
+        path_graph_map[path] = newGraph;
         graph8902.push_back(newGraph);
     }
 }
 
-void ManageTask::StateChanged(const QString& state, int step)
+void ManageTask::undisplayWaveform(const QString& path, const int& deviceType)
 {
-    if (state == tr("State Init"))
+    if(path_graph_map.find(path) == path_graph_map.end()) return;
+    if(deviceType == 5322)
     {
-        leds.clear();
-        while (QLayoutItem* item = ui->horizontalLayout_TaskProgress->takeAt(0)) {
-            delete item->widget(); // Delete widget
-            delete item; // Delete layout item
-        }
-        for(int i = 0; i < step; i++)
-        {
-            auto *led = new LED(this, tr("步骤%1").arg(i + 1));
-            led->set_led_status("ready");
-            ui->horizontalLayout_TaskProgress->addWidget(led);
-            leds.push_back(led);
-        }
+        std::vector<QCPGraph*> graphs = {path_graph_map[path]};
+        customPlot5322->removeLine(graphs);
+        graph5322.erase(std::remove(graph5322.begin(), graph5322.end(), path_graph_map[path]), graph5322.end());
     }
-    else if (state == "Step Begin")
+    else if(deviceType == 5323)
     {
-        leds[step - 1]->set_led_status("running");
-    }
-    else if (state == "Step Finished")
+        std::vector<QCPGraph*> graphs = {path_graph_map[path]};
+        customPlot5323->removeLine(graphs);
+        graph5323.erase(std::remove(graph5323.begin(), graph5323.end(), path_graph_map[path]), graph5323.end());
+    }else if(deviceType == 8902)
     {
-        if(step > 0)
-        {
-            leds[step - 1]->set_led_status("finished");
-        }
+        std::vector<QCPGraph*> graphs = {path_graph_map[path]};
+        customPlot8902->removeLine(graphs);
+        graph8902.erase(std::remove(graph8902.begin(), graph8902.end(), path_graph_map[path]), graph8902.end());
     }
-    else if (state == "Step Interrupted")
-    {
-        QMessageBox::warning(this, "提示", "任务" + currentTaskId + "被中断", QMessageBox::Ok);
-    }
+    path_graph_map.erase(path);
+}
 
-    else if(state.startsWith("Connect Wire:"))
+void ManageTask::StateChanged(int state, const QString& message)
+{
+    switch(state)
     {
-        QString step_id = state.split(":").at(1);
-        taskConnectWire->setStep(step_id);
-        stackedWidget_connectwire->setCurrentIndex(0);
-        parent->statusBar()->showMessage(state);
-    }else if(state == "getinfraredimage")
-    {
-        infraredcamera.on_pbsave_clicked();
-    }
-    else if(step == -1)
-    {
-        QMessageBox::warning(this, "错误", state, QMessageBox::Ok);
-    }else
-    {
-        parent->statusBar()->showMessage(state.toStdString().c_str());
+        case 10:
+        {
+            int leftBracket = message.indexOf("[");
+            int rightBracket = message.indexOf("]");
+            int step = message.mid(leftBracket + 1, rightBracket - leftBracket - 1).toInt();
+            leds[step_led_map[step]]->set_led_status("running");
+            break;
+        }
+        case 11:
+        {
+            int leftBracket = message.indexOf("[");
+            int rightBracket = message.indexOf("]");
+            int step = message.mid(leftBracket + 1, rightBracket - leftBracket - 1).toInt();
+            leds[step_led_map[step]]->set_led_status("finished");
+            break;
+        }
     }
 }
 
 void ManageTask::on_pbViewTask_clicked()
 {
-    if(!graph5322.empty()) 
+    if(!graph5322.empty())
     {
         customPlot5322->removeLine(graph5322);
         graph5322.clear();
     }
-    if(!graph5323.empty()) 
+    if(!graph5323.empty())
     {
         customPlot5323->removeLine(graph5323);
         graph5323.clear();
     }
-    if(!graph8902.empty()) 
+    if(!graph8902.empty())
     {
         customPlot8902->removeLine(graph8902);
         graph8902.clear();
@@ -530,94 +491,56 @@ void ManageTask::on_pbViewTask_clicked()
     irimagedisplay_temp->clear();
     irimagedisplay->clear();
 
-    if(currentTaskId.isEmpty() || device_id.isEmpty()) return;
+    if(currentTaskId.isEmpty() || device_id < 0) return;
     std::vector<Step> steps;
-    QString table_name_step = device_id + "$$Step";
+    QString table_name_step = QString::number(device_id) + "$$Step";
     database.get_step(table_name_step, "test_task_id = '" + currentTaskId + "'", steps);
     if(steps.empty()) return;
     setupTreeWidget(steps);
 }
 
-
+void ManageTask::InitalizeLED()
+{
+    std::vector<Step> steps;
+    QString table_name_step = QString::number(device_id) + "$$Step";
+    database.get_step(table_name_step, "test_task_id = '" + currentTaskId + "'", steps);
+    leds.clear();
+    while (QLayoutItem* item = ui->horizontalLayout_TaskProgress->takeAt(0)) {
+        delete item->widget(); // Delete widget
+        delete item; // Delete layout item
+    }
+    for(auto &step : steps)
+    {
+        auto *led = new LED(this, tr("步骤%1").arg(step.step_number));
+        led->set_led_status("ready");
+        ui->horizontalLayout_TaskProgress->addWidget(led);
+        leds.push_back(led);
+        step_led_map[step.step_number] = leds.size() - 1;
+    }
+}
 void ManageTask::on_pdRuntask_clicked()
 {
-    if(isTaskRunning)
+    if(runTask->GetTaskStatus() == RunTaskStatus::Running)
     {
-        QMessageBox::warning(this, "提示", "任务" + current_run_task_id + "正在运行，请先结束任务", QMessageBox::Ok);
+        QMessageBox::warning(this, "提示", "任务正在运行", QMessageBox::Ok);
         return;
     }
-    ui->pdRuntask->setEnabled(false);
-    current_run_task_id = currentTaskId;
-
-    std::vector<Step> steps;
-    QString table_name_step = device_id + "$$Step";
-    database.get_step(table_name_step, QString("test_task_id = '%1'").arg(currentTaskId), steps);
-    if(steps.empty())
+    else
     {
-        ui->pdRuntask->setEnabled(true);
-        return;
+        InitalizeLED();
+        runTask->RunTestTask(device_id, currentTaskId);
     }
-    if(taskisexecuting)
-    {
-        ui->pdRuntask->setEnabled(true);
-        QMessageBox::warning(this, "提示", "设备正在运行中,请先停止当前运行任务");
-        return;
-    }
-    // if(!g_ch340->writeString("FF01FF"))
-    // {
-    //     ui->pdRuntask->setEnabled(true);
-    //     QMessageBox::warning(this, "错误", "操作面板开关打开失败！");
-    // }
-    infraredcamera.setonlyemitdata(true);
-    infraredcamera.showWindow();
-    taskisexecuting = true;
-    taskConnectWire->setDevice(device_id);
-    QString TableName = device_id + "$$" + currentTaskId + "$$" + QDateTime::currentDateTime().toString("yyyy_MM_dd_hh_mm_ss");
-    current_run_task_table = TableName;
-
-    isTaskRunning = true;
-    taskThread = std::make_shared<QThread>();
-    localExecuteTask = std::make_shared<ExecuteTask>(currentTaskId, TableName, false);
-    localExecuteTask->moveToThread(taskThread.get());
-
-    connect(localExecuteTask.get(), &ExecuteTask::StateChanged, this, &ManageTask::StateChanged);
-    connect(localExecuteTask.get(), &ExecuteTask::GetInfraredImage, this, &ManageTask::GetInfraredImage);
-    connect(localExecuteTask.get(), &ExecuteTask::TaskFinished, this, [this]() {
-        taskThread->quit();
-        taskThread->wait();
-        isTaskRunning = false;
-    });
-    connect(taskThread.get(), &QThread::finished, this, [this]() {
-        auto localTask = std::move(localExecuteTask);
-        if(localTask) localTask.reset();
-        is_infraredcamera_save = false;
-        infraredcamera.closeWindow();
-        current_run_task_table.clear();
-        taskisexecuting = false;
-        // g_ch340->writeString("FF00FF");
-        emit UpdateMysqlDataSignal();
-    });
-    taskThread->start();
-    localExecuteTask->StartTask();
-    ui->pdRuntask->setEnabled(true);
 }
-
-void ManageTask::deleteImage(const QString &imageId)
-{
-    QString table_name_image = device_id + "$$image";
-    database.delete_image(table_name_image, QString("id = '%1'").arg(imageId));
-}
-
-
 void ManageTask::on_pbInterrupt_clicked()
 {
-    if(!isTaskRunning)
+    if(runTask->GetTaskStatus() == RunTaskStatus::Running)
     {
-        return;
+        runTask->InterruptTask();
     }
-    isTaskRunning = false;
-    taskisexecuting = false;
-    localExecuteTask->InterruptTask();
+    else
+    {
+        QMessageBox::warning(this, "提示", "任务未运行", QMessageBox::Ok);
+    }
 }
 
 
@@ -627,7 +550,7 @@ void ManageTask::on_pbnextstep_clicked()
     {
         return;
     }
-    localExecuteTask->ContinueTask();
+    // localExecuteTask->ContinueTask();
 }
 
 void ManageTask::on_showOrHideBtn_clicked()
@@ -672,7 +595,7 @@ void ManageTask::on_cbdeviceid_activated(int index)
 void ManageTask::on_pbrefresh_clicked()
 {
     ui->cbdeviceid->clear();
-    if(device_id.isEmpty())
+    if(device_id < 0)
     {
         return;
     }
@@ -695,77 +618,12 @@ void ManageTask::on_pbrefresh_clicked()
     updateTaskComboBox();
 }
 
-void ManageTask::GetInfraredImage(Step step)
-{
-    if(is_infraredcamera_save) return;
-    is_infraredcamera_save = true;
-    current_step = step;
-    QThread *thread = QThread::create([this]() {
-        if(current_step.isthermometry)
-        {
-            QThread::msleep(current_step.collecttime * (current_step.thermometry_pause_time / 100));
-            infraredcamera.on_pbsave_clicked();
-        }
-    });
-    thread->start();
-    connect(thread, &QThread::finished, this, [this, thread]() {
-        delete thread;
-    });
-}
-
-void ManageTask::saveinfraredframe(const QImage& image, uint16_t *tempData, uint32_t tempWidth, uint32_t tempHeight)
-{
-    std::vector<uint16_t> tempDataVector;
-    tempDataVector.assign(tempData, tempData + tempWidth * tempHeight);
-
-    if(is_infraredcamera_save)
-    {
-        std::vector<uint16_t> tempDataVector;
-        tempDataVector.assign(tempData, tempData + tempWidth * tempHeight);
-
-        if(current_run_task_table.isEmpty())
-        {
-            is_infraredcamera_save = false;
-            return;
-        }
-        IRimage.id = current_run_task_table.split("$$")[1] + "_" + current_run_task_table.split("$$")[2] + "_" + QString::number(current_step.step_number);
-        IRimage.step_id = current_step.id;
-        IRimage.task_table_name = current_run_task_table.split("$$")[1] + "_" + current_run_task_table.split("$$")[2];
-        IRimage.device = "infraredcamera";
-        IRimage.temp_width = tempWidth;
-        IRimage.temp_height = tempHeight;
-        QByteArray byteArray;
-        QBuffer buffer(&byteArray);
-        buffer.open(QIODevice::WriteOnly);
-        image.save(&buffer, "JPG");
-        buffer.close();
-        IRimage.image_data = byteArray;
-
-        QByteArray tempByteArray;
-        QBuffer tempBuffer(&tempByteArray);
-        tempBuffer.open(QIODevice::WriteOnly);
-        tempBuffer.write(reinterpret_cast<const char*>(tempDataVector.data()), tempWidth * tempHeight * sizeof(uint16_t));
-        tempBuffer.close();
-        IRimage.temp_data = tempByteArray;  
-        QString device = current_run_task_table.split("$$")[0];
-        QString table_name_image = device + "$$image";
-        QString ErrorMessage;
-        if(!database.insert_image(table_name_image, IRimage, ErrorMessage))
-        {
-            is_infraredcamera_save = false;
-            QMessageBox::warning(this, "图像保存失败", ErrorMessage);
-            return;
-        }
-        is_infraredcamera_save = false;
-    }
-}
-
 void ManageTask::on_pblabelinfoshow_clicked()
 {
     QString ErrorMessage;
     std::vector<Device> devices;
     label_info.clear();
-    if(!database.get_device("id = '" + device_id + "'", devices, true))
+    if(!database.get_device("id = '" + QString::number(device_id) + "'", devices, true))
     {
         return;
     }
@@ -793,12 +651,6 @@ void ManageTask::on_pblabelinfoshow_clicked()
     labelediting->show();
 }
 
-void ManageTask::ConnectWire(QString step_id)
-{
-    stackedWidget_connectwire->setCurrentIndex(0);
-    taskConnectWire->setDevice(device_id);
-}
-
 void ManageTask::on_pb8902expand_clicked()
 {
     handlePlotExpand(plot8902Window, customPlot8902, placeholderLabel8902, ui->horizontalScrollBar_8902, ui->gridLayout_8902, "万用表");
@@ -814,7 +666,7 @@ void ManageTask::on_pb5323expand_clicked()
     handlePlotExpand(plot5323Window, customPlot5323, placeholderLabel5323, ui->horizontalScrollBar_5323, ui->gridLayout_5323, "数字量输入");
 }
 
-void ManageTask::handlePlotExpand(QWidget*& plotWindow, UESTCQCustomPlot* customPlot, QLabel*& placeholderLabel, 
+void ManageTask::handlePlotExpand(QWidget*& plotWindow, UESTCQCustomPlot* customPlot, QLabel*& placeholderLabel,
                                  QScrollBar* scrollBar, QGridLayout* gridLayout, const QString& title)
 {
     if (!plotWindow) {
@@ -827,29 +679,29 @@ void ManageTask::handlePlotExpand(QWidget*& plotWindow, UESTCQCustomPlot* custom
         QFont font = placeholderLabel->font();
         font.setPointSize(placeholderLabel->height() / 10); // 根据label高度调整字体大小
         placeholderLabel->setFont(font);
-        
+
 
         // 创建新窗口
         plotWindow = new QWidget(nullptr);
         plotWindow->setAttribute(Qt::WA_DeleteOnClose, false);
         plotWindow->setWindowTitle(title);
         plotWindow->resize(800, 600);
-        
+
         // 创建布局
         auto* mainLayout = new QVBoxLayout(plotWindow);
         auto* plotWidget = new QWidget;
         auto* plotLayout = new QVBoxLayout(plotWidget);
         plotLayout->setContentsMargins(0, 0, 0, 0);
-        
+
         // 移动图表和滚动条到新窗口
         customPlot->setParent(plotWidget);
         plotLayout->addWidget(customPlot);
         scrollBar->setParent(plotWidget);
         plotLayout->addWidget(scrollBar);
-        
+
         mainLayout->addWidget(plotWidget);
         gridLayout->addWidget(placeholderLabel, 0, 0);
-        
+
         plotWindow->installEventFilter(this);
         plotWindow->show();
     } else {
@@ -913,41 +765,24 @@ void ManageTask::handlePlotReparent(UESTCQCustomPlot* customPlot, QLabel*& place
             oldLayout->removeWidget(customPlot);
             oldLayout->removeWidget(scrollBar);
         }
-        
+
         // 删除占位Label
         if (placeholderLabel) {
             gridLayout->removeWidget(placeholderLabel);
             delete placeholderLabel;
             placeholderLabel = nullptr;
         }
-        
+
         // 重新添加到主窗口的布局中
         customPlot->setParent(this);
         scrollBar->setParent(this);
         gridLayout->addWidget(customPlot);
         verticalLayout->addWidget(scrollBar);
-        
+
         // 更新布局
         customPlot->show();
         scrollBar->show();
     }
-}
-
-
-void ManageTask::saveinfraredframe_hypertherm(QImage image, std::vector<uint16_t> tempData, uint32_t tempWidth, uint32_t tempHeight)
-{
-    if(irimagedisplay_hypertherm)
-    {
-        irimagedisplay_hypertherm->setImage(image, tempData, tempWidth, tempHeight);
-        irimagedisplay_hypertherm->show();
-    }else
-    {
-        irimagedisplay_hypertherm = new IRImageDisplay(nullptr);
-        irimagedisplay_hypertherm->setImage(image, tempData, tempWidth, tempHeight);
-        irimagedisplay_hypertherm->MarkMaxTemp(true);
-        irimagedisplay_hypertherm->show();
-    }
-    on_pbInterrupt_clicked();
 }
 
 

@@ -9,77 +9,64 @@
 #include <qDebug>
 #include <QCloseEvent>
 #include <QShowEvent>
+#include <mutex>
 
-namespace Ui {
-class Camera;
-}
+#define g_camera Camera::getInstance()
+
+struct IRImageData {
+    cv::Mat image;
+    uint16_t *tempData;
+    uint32_t tempWidth;
+    uint32_t tempHeight;
+};
+
+enum class CameraModel {
+    RGB,
+    IR,
+};
+
+enum class CameraState {
+    START,
+    STOP,
+};
 
 class Camera : public QWidget
 {
     Q_OBJECT
 
 public:
-    static Camera& getInstance(QWidget *parent = nullptr, bool is_emit = false) {
-        static Camera instance(parent, is_emit);
+    static Camera& getInstance(QWidget *parent = nullptr) {
+        static Camera instance(parent);
         return instance;
     }
+    IRImageData getImageData(){ return m_imageData; };
+    void SetFormat(CameraModel format){ this->format = format; };
+    void startStream();
+    void stopStream();
 
-    virtual void displayImage(cv::Mat &image);
-    void showWindow();
-    void closeWindow();
+    CameraState GetCameraState(){ return m_state; };
 
-    void setonlyemitdata(bool is_only_emit = false);
+    IRImageData m_imageData;
+    CameraModel format = CameraModel::IR;
 
-    void temp_monitor(QImage image, uint16_t *tempData, uint32_t tempWidth, uint32_t tempHeight);
-
-    QImage rgbImage;
-    QImage signalImage;
-    QString format = "RGB";
-    uint16_t *tempData;
-    uint32_t tempWidth;
-    uint32_t tempHeight;
-
-    Ui::Camera *ui;
-    explicit Camera(QWidget *parent = nullptr, bool is_emit = false);
-    virtual ~Camera();
-
-
-public slots:
-    virtual void on_pbsave_clicked();
-    void on_pbcanael_clicked();
-    void on_pbformatconversion_clicked();
-
+    std::mutex m_mutex;
 signals:
-    void Image_rgb(const QImage &image, uint16_t *tempData, uint32_t tempWidth, uint32_t tempHeight);
-
-    void signal_close();
-
-    void Image_ir_hypertherm(QImage image, std::vector<uint16_t> tempData, uint32_t tempWidth, uint32_t tempHeight);
+    void Image_data(const IRImageData imageData);
 
 private:
+    explicit Camera(QWidget *parent = nullptr);
+    virtual ~Camera();
 
     JPEG_STREAMER rgbStreamer;
     JPEG_STREAMER irStreamer;
     TEMP_STREAMER tempStreamer;
 
-    float hypertherm_temp = 90;
-
-    bool is_stream_running = false;
-    bool is_stream_stopping = true;
-    bool is_emit;
-    bool is_only_emit_data = false;
+    CameraState m_state = CameraState::STOP;
 
 
     // 禁止拷贝构造和赋值操作
     Camera(const Camera&) = delete;
     Camera& operator=(const Camera&) = delete;
-
-protected:
-    void startStream();
-    void stopStream();
-    void stopStreamAsync();
-    void GetMousePosition(int &tempX, int &tempY, int &mouseX, int &mouseY);
-    void closeEvent(QCloseEvent *event) override;
 };
 
 #endif // CAMERA_H

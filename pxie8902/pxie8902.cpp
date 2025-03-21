@@ -9,43 +9,70 @@ PXIe8902::PXIe8902(QObject *parent) :
     SampleRate(50),
     AcqData(1)
 {
-
+    // 初始状态为关闭
+    updateStatus(PXIe8902Status::Closed);
 }
 
 PXIe8902::~PXIe8902() {
-    std::lock_guard<std::mutex> lock(mtx);
-    if(!isStarted) return;
+    // 确保线程安全退出
+    {
+        std::lock_guard<std::mutex> lock(mtx);
+        shouldExit = true;
+        cv.notify_all();
+    }
+    
+    if(fetchThread) {
+        if(QThread::currentThread() != fetchThread) {
+            fetchThread->quit();
+            fetchThread->wait();
+            delete fetchThread;
+        } else {
+            fetchThread->disconnect();
+        }
+        fetchThread = nullptr;
+    }
+    
     if(pDataBuf)
     {
         delete[] pDataBuf;
         pDataBuf = nullptr;
     }
+    
     if(hDevice)
     {
         if(JY8902_SetDeviceStatusLed(hDevice, false, 0) != 0)
         {
             errorMsg = "JY8902_SetDeviceStatusLed: set failed!";
-            qDebug() << errorMsg;
         }
         if(JY8902_DMM_Stop(hDevice) != 0)
         {
             errorMsg = "JY8902_DMM_Stop: failed!";
-            qDebug() << errorMsg;
         }
 
         if(JY8902_Close(hDevice) != 0)
         {
             errorMsg = "JY8902_Close: failed!";
-            qDebug() << errorMsg;
         }
         hDevice = nullptr;
-        isStarted = false;
+        updateStatus(PXIe8902Status::Closed);
     }
 }
 
+bool PXIe8902::SelfTest()
+{
+    {std::lock_guard<std::mutex> lock(mtx);
+    if(m_status != PXIe8902Status::Closed) return true;}
+    if(JY8902_Open(0, &hDevice) != 0)
+    {
+        errorMsg = "JY8902_Open: 打开设备失败!";
+        return false;
+    }
+    JY8902_DMM_Stop(hDevice);
+    JY8902_Close(hDevice);
+    return true;
+}
 bool PXIe8902::InitDevice(QString& errorMsg) {
-    JY8902_DMM_AC_CurrentRange currentRange = static_cast<JY8902_DMM_AC_CurrentRange>(0);
-    JY8902_DMM_AC_VoltRange voltRange = static_cast<JY8902_DMM_AC_VoltRange>(0);
+
     JY8902_DMM_2_Wire_ResistanceRange ResistanceRange = static_cast<JY8902_DMM_2_Wire_ResistanceRange>(0);
 
     double sampleInterval = 0.02;
@@ -66,33 +93,54 @@ bool PXIe8902::InitDevice(QString& errorMsg) {
         return false;
     }
 
-    if (testtype == "current")
+    if (testtype == PXIe8902_testtype::PXIe8902_current)
     {
-        if (JY8902_DMM_SetMeasurementFunction(hDevice, JY8902_DMM_MeasurementFunction::JY8902_AC_Current) != 0)
+        JY8902_DMM_MeasurementFunction measurementFunction = signaltype ? JY8902_DMM_MeasurementFunction::JY8902_DC_Current : JY8902_DMM_MeasurementFunction::JY8902_AC_Current;
+        if (JY8902_DMM_SetMeasurementFunction(hDevice, measurementFunction) != 0)
         {
             errorMsg = "JY8902_DMM_SetMeasurementFunction: set failed!";
             return false;
         }
-
-        if (JY8902_DMM_SetACCurrent(hDevice, currentRange) != 0)
-        {
-            errorMsg = "JY8902_DMM_SetACCurrent: set failed!";
-            return false;
+        if(signaltype) {
+            JY8902_DMM_DC_CurrentRange currentRange = static_cast<JY8902_DMM_DC_CurrentRange>(0);
+            if (JY8902_DMM_SetDCCurrent(hDevice, currentRange) != 0)
+            {
+                errorMsg = "JY8902_DMM_SetDCCurrent: set failed!";
+                return false;
+            }
+        } else {
+            JY8902_DMM_AC_CurrentRange currentRange = static_cast<JY8902_DMM_AC_CurrentRange>(0);
+            if (JY8902_DMM_SetACCurrent(hDevice, currentRange) != 0)
+            {
+                errorMsg = "JY8902_DMM_SetACCurrent: set failed!";
+                return false;
+            }
         }
-    }else if (testtype == "voltage")
+    } else if (testtype == PXIe8902_testtype::PXIe8902_voltage)
     {
-        if (JY8902_DMM_SetMeasurementFunction(hDevice, JY8902_DMM_MeasurementFunction::JY8902_AC_Volts) != 0)
+        JY8902_DMM_MeasurementFunction measurementFunction = signaltype ? JY8902_DMM_MeasurementFunction::JY8902_DC_Volts : JY8902_DMM_MeasurementFunction::JY8902_AC_Volts;
+        if (JY8902_DMM_SetMeasurementFunction(hDevice, measurementFunction) != 0)
         {
             errorMsg = "JY8902_DMM_SetMeasurementFunction: set failed!";
             return false;
         }
-        if(JY8902_DMM_SetACVolt(hDevice, voltRange) != 0)
-        {
-            errorMsg = "JY8902_DMM_SetACVolt: set failed!";
-            return false;
+        if(signaltype) {
+            JY8902_DMM_DC_VoltRange voltRange = static_cast<JY8902_DMM_DC_VoltRange>(0);
+            if (JY8902_DMM_SetDCVolt(hDevice, voltRange) != 0)
+            {
+                errorMsg = "JY8902_DMM_SetDCVolt: set failed!";
+                return false;
+            }
+        } else {
+            JY8902_DMM_AC_VoltRange voltRange = static_cast<JY8902_DMM_AC_VoltRange>(0);
+            if (JY8902_DMM_SetACVolt(hDevice, voltRange) != 0)
+            {
+                errorMsg = "JY8902_DMM_SetACVolt: set failed!";
+                return false;
+            }
         }
     }
-    else if (testtype == "resistance")
+    else if (testtype == PXIe8902_testtype::PXIe8902_resistance)
     {
         if(JY8902_DMM_SetMeasurementFunction(hDevice, JY8902_DMM_MeasurementFunction::JY8902_2_Wire_Resistance) != 0)
         {
@@ -151,86 +199,129 @@ bool PXIe8902::InitDevice(QString& errorMsg) {
     }
 
     pDataBuf = new double[samplesToAcq];
-    qDebug() << "PXIe8902::InitDevice: samplesToAcq: " << samplesToAcq;
     return true;
 }
 
 bool PXIe8902::StartAcquisition(std::vector<Data8902> collectdata, double collecttime) {
+    // 如果设备正在运行，先关闭
+    if (m_status != PXIe8902Status::Closed) {
+        DeviceClose();
+    }
+    
     testtype = collectdata[0].test_type;
     this->TotalSamplesToAcq = static_cast<int>(SampleRate * collecttime);
     this->samplesToAcq = (SampleRate * collecttime) > SampleRate ? SampleRate : (SampleRate * collecttime);
     serial_number = 0;
-
+    signaltype = collectdata[0].model;
+    
     if(!InitDevice(errorMsg)){
-        emit StateChanged(errorMsg, -1);
         handleError();
-        emit CompleteAcquisition();
         return false;
     }
-
+    
     PXIe5320Waveform waveform;
     waveform.id = collectdata[0].id;
     waveform.step_id = collectdata[0].step_id;
     waveform.device = 8902;
-    waveform.port = -1;
+    if(testtype == PXIe8902_testtype::PXIe8902_voltage) {
+        waveform.port = -1;
+    } else if(testtype == PXIe8902_testtype::PXIe8902_current) {
+        waveform.port = -2;
+    } else if(testtype == PXIe8902_testtype::PXIe8902_resistance) {
+        waveform.port = -3;
+    }
     waveform.data = {};
     this->collectdata.clear();
     this->collectdata.push_back(waveform);
-
+    
+    // 更新状态为准备
+    updateStatus(PXIe8902Status::Ready);
     emit DeviceReady();
+    
+    return true;
 }
 
-void PXIe8902::SendSoftTrigger() {
-    if(isStarted) return;
-
-    QThread* fetchThread = QThread::create([this]() {
-        while (isStarted) {
-            this->FetchData();
-            QThread::msleep(1); // 相当于10ms的定时器间隔
+bool PXIe8902::SendSoftTrigger() {
+    // 只有在准备状态才能触发
+    if (m_status != PXIe8902Status::Ready || isStarted) {
+        errorMsg = "设备未准备好，无法触发";
+        handleError();
+        return false;
+    }
+    
+    {
+        std::lock_guard<std::mutex> lock(mtx);
+        paused = false;
+        isStarted = true;
+    }
+    
+    if(fetchThread == nullptr) {
+        fetchThread = new QThread();
+        QObject* worker = new QObject();
+        worker->moveToThread(fetchThread);
+        connect(fetchThread, &QThread::started, worker, [this, worker]() {
+            while (true) {
+                std::unique_lock<std::mutex> lock(mtx);
+                cv.wait(lock, [this](){ return !paused || shouldExit; });
+                if (shouldExit)
+                    break;
+                lock.unlock();
+                this->FetchData();
+                QThread::msleep(1);
+            }
+            QMetaObject::invokeMethod(worker, "deleteLater", Qt::QueuedConnection);
+        });
+        fetchThread->start();
+    } else {
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            paused = false;
         }
-    });
-    connect(fetchThread, &QThread::finished, fetchThread, &QObject::deleteLater);
-    fetchThread->start();
-
-    this->isStarted = true;
-
+        cv.notify_all();
+    }
+    
     if(JY8902_DMM_SendSoftTrigger(hDevice)!= 0)
     {
         errorMsg ="JY8902_DMM_SendSoftTrigger:failed!";
-        emit StateChanged(errorMsg, -1);
         handleError();
-        return;
+        return false;
     }
-    qDebug() << "PXIe8902::SendSoftTrigger: send soft trigger";
+    
+    updateStatus(PXIe8902Status::Running);
+    return true;
 }
 
-
 void PXIe8902::DeviceClose() {
-    if(!isStarted) {
-        return;
-    }
-    if(hDevice)
-    {
-        if(JY8902_SetDeviceStatusLed(hDevice, false, 0) != 0)
-        {
+    std::lock_guard<std::mutex> lock(mtx);
+    if (!isStarted && m_status == PXIe8902Status::Closed) return;
+    
+    isStarted = false;
+    paused = true;
+    
+    if (hDevice) {
+        if (JY8902_SetDeviceStatusLed(hDevice, false, 0) != 0) {
             errorMsg = "JY8902_SetDeviceStatusLed: set failed!";
-            qDebug() << errorMsg;
         }
-        if(JY8902_DMM_Stop(hDevice)!= 0)
-        {
-            errorMsg ="JY8902_DMM_Stop:failed!";
+        if (JY8902_DMM_Stop(hDevice) != 0) {
+            errorMsg = "JY8902_DMM_Stop: failed!";
         }
-        if(JY8902_Close(hDevice)!= 0)
-        {
-            errorMsg ="JY8902_Close:failed!";
+        if (JY8902_Close(hDevice) != 0) {
+            errorMsg = "JY8902_Close: failed!";
         }
         hDevice = NULL;
     }
-    isStarted = false;
+    
+    // 更新状态为关闭
+    updateStatus(PXIe8902Status::Closed);
 }
 
 void PXIe8902::FetchData() {
-    if(!isStarted) return;
+    if (!isStarted) return;
+    {
+        std::lock_guard<std::mutex> lock(mtx);
+        // 检查是否应该退出
+        if (shouldExit) return;
+    }
     unsigned long long availableSamples = 0;
     int actualSample = 0;
     unsigned long long transferedSamples = 0;
@@ -242,7 +333,7 @@ void PXIe8902::FetchData() {
         handleError();
         return;
     }
-    
+
     if(availableSamples < samplesToAcq)
     {
         return;
@@ -273,15 +364,21 @@ void PXIe8902::FetchData() {
 
     emit signalAcquisitionData(collectdata, serial_number);
 
-    DeviceClose();
+    if(continueAcquisition) {
+        TotalSamplesToAcq += SampleRate;
+        collectdata[0].data.clear();
+        return;
+    }
+
+    QMetaObject::invokeMethod(this, "DeviceClose", Qt::QueuedConnection);
     emit CompleteAcquisition();
 
     delete[] pDataBuf;
     pDataBuf = nullptr;
 }
 
-
 void PXIe8902::handleError() {
+    emit StateChanged(errorMsg, -1);
     if(pDataBuf)
     {
         delete[] pDataBuf;
@@ -291,15 +388,31 @@ void PXIe8902::handleError() {
     SampleRemain = 0;
     serial_number = 0;
 
-    QMetaObject::invokeMethod(this, [this]() {
-        DeviceClose();
-        emit CompleteAcquisition();
-    }, Qt::QueuedConnection);
+    DeviceClose();
 }
 
 void PXIe8902::InterruptAcquisition() {
-    TotalSamplesToAcq = 0;
-    samplesToAcq = 0;
+    std::lock_guard<std::mutex> lock(mtx);
+    shouldExit = true;
+}
+
+void PXIe8902::updateStatus(PXIe8902Status status) {
+    if (m_status != status) {
+        m_status = status;
+        
+        // 根据状态发送不同的信号
+        switch (status) {
+            case PXIe8902Status::Closed:
+                emit StateChanged("设备已关闭", 0);
+                break;
+            case PXIe8902Status::Ready:
+                emit StateChanged("设备已准备", 1);
+                break;
+            case PXIe8902Status::Running:
+                emit StateChanged("设备运行中", 2);
+                break;
+        }
+    }
 }
 
 

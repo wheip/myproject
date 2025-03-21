@@ -42,7 +42,7 @@ public slots:
     void handleNodeRun(FlowNode* node);
     void saveCurrentTask();
     void deleteCurrentTask();
-    void onDeviceIdChanged(const QString& newDeviceId);
+    void onDeviceIdChanged(const int& newDeviceId);
     void showSelectComponentDialog();
 
 signals:
@@ -68,7 +68,7 @@ private:
     QPushButton *deleteTaskBtn;
     QComboBox *taskListCombo;
     std::shared_ptr<Database> db;
-    QString deviceId;
+    int deviceId;
     int currentElementId = -1;  // 当前选中的被测元件ID
     QLabel *currentElementLabel;  // 显示当前被测元件的标签
 };

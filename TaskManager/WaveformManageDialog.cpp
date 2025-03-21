@@ -26,7 +26,7 @@ const QList<int> WaveformManageDialog::AVAILABLE_CHANNELS = [](){
 const QStringList WaveformManageDialog::ANALOG_POWER_TYPES = {"HighLevelWave", "LowLevelWave"};
 const QStringList WaveformManageDialog::DIGITAL_TYPES = {"SineWave", "SquareWave", "TriangleWave"};
 
-WaveformManageDialog::WaveformManageDialog(const QString& stepId, const QString& deviceId, QWidget *parent)
+WaveformManageDialog::WaveformManageDialog(const int& stepId, const int& deviceId, QWidget *parent)
     : QDialog(parent)
     , m_stepId(stepId)
     , m_deviceId(deviceId)
@@ -39,7 +39,7 @@ WaveformManageDialog::WaveformManageDialog(const QString& stepId, const QString&
     
     // 加载设备图像和标签
     std::vector<Device> devices;
-    if (db->get_device("id = '" + deviceId + "'", devices, true) && !devices.empty()) {
+    if (db->get_device("id = '" + QString::number(deviceId) + "'", devices, true) && !devices.empty()) {
         deviceImage = QImage::fromData(devices[0].image);
     }
     
@@ -166,11 +166,11 @@ void WaveformManageDialog::updateTableRow(int row, const PXIe5711Waveform& wavef
     // 波形类型列（使用下拉框）
     QComboBox *waveformTypeCombo = new QComboBox(tableWidget);
     waveformTypeCombo->addItems(getWaveformTypes(waveform.channel));
-    waveformTypeCombo->setCurrentText(waveform.waveform_type);
-    connect(waveformTypeCombo, &QComboBox::currentTextChanged,
-            [this, row](const QString &text) {
+    waveformTypeCombo->setCurrentText(PXIe5711_testtype_to_string(waveform.waveform_type));
+    connect(waveformTypeCombo, &QComboBox::currentIndexChanged,
+            [this, row](const int &index) {
                 if (row < m_waveforms.size()) {
-                    m_waveforms[row].waveform_type = text;
+                    m_waveforms[row].waveform_type = static_cast<PXIe5711_testtype>(index + static_cast<int>(m_waveforms[row].waveform_type));
                 }
             });
     tableWidget->setCellWidget(row, 2, waveformTypeCombo);
@@ -229,13 +229,12 @@ void WaveformManageDialog::addWaveform()
 
     PXIe5711Waveform newWaveform;
     int channel = channelComboBox->currentData().toInt();
-    newWaveform.id = QString("%1_%2").arg(m_stepId).arg(channel);  // 格式：步骤id_通道号
     newWaveform.step_id = m_stepId;
     newWaveform.channel = channel;
     // 设置默认波形类型
     QStringList types = getWaveformTypes(channel);
     if (!types.isEmpty()) {
-        newWaveform.waveform_type = types.first();
+        newWaveform.waveform_type = static_cast<PXIe5711_testtype>(types == ANALOG_POWER_TYPES ? 0 : 2);
     }
     
     m_waveforms.append(newWaveform);
@@ -258,7 +257,7 @@ void WaveformManageDialog::deleteWaveform()
     
     int row = selectedItems.first()->row();
     if (row >= 0 && row < m_waveforms.size()) {
-        QString tableName = m_deviceId + "$$PXIe5711";
+        QString tableName = QString::number(m_deviceId) + "$$PXIe5711";
         db->delete_pxie5711waveform(tableName, m_waveforms[row].id);
         for (int col = 0; col < tableWidget->columnCount(); ++col) {
             QWidget *widget = tableWidget->cellWidget(row, col);
@@ -356,7 +355,7 @@ QStringList WaveformManageDialog::getWaveformTypes(int channel)
 
 void WaveformManageDialog::onAccepted()
 {
-    QString tableName = m_deviceId + "$$PXIe5711";
+    QString tableName = QString::number(m_deviceId) + "$$PXIe5711";
     
     // 保存当前的波形列表
     for (const auto& waveform : m_waveforms) {
@@ -376,10 +375,10 @@ void WaveformManageDialog::showEvent(QShowEvent *event)
     QDialog::showEvent(event);
 
     // 每次对话框打开时，从数据库中加载对应步骤的端口信息
-    QString tableName = m_deviceId + "$$PXIe5711";
+    QString tableName = QString::number(m_deviceId) + "$$PXIe5711";
     std::vector<PXIe5711Waveform> waveformsFromDb;
     QString errorMsg;
-    if (db->get_pxie5711waveform(tableName, "step_id = '" + m_stepId + "'", waveformsFromDb)) {
+    if (db->get_pxie5711waveform(tableName, "step_id = '" + QString::number(m_stepId) + "'", waveformsFromDb)) {
         // 更新 m_waveforms
         m_waveforms = QList<PXIe5711Waveform>(waveformsFromDb.begin(), waveformsFromDb.end());
     } else {
