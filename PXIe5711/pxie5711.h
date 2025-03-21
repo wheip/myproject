@@ -38,7 +38,7 @@ public slots:
 
     bool SendSoftTrigger();
 
-    void InitializeDevice();
+    bool InitializeDevice();
 
 signals:
     void WaveformGenerated();

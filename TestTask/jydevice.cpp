@@ -194,7 +194,12 @@ void JYDevice::init5322()
 void JYDevice::on_Initwaveform_clicked()
 {
     if(!device5711) return;
-    QMetaObject::invokeMethod(device5711, "InitializeDevice", Qt::QueuedConnection);
+    if(!device5711->InitializeDevice())
+    {
+        QString errorMsg = device5711->getErrorMessage();
+        QMessageBox::warning(this, "错误", errorMsg);
+        return;
+    }
 }
 
 void JYDevice::on_start_5711_clicked()

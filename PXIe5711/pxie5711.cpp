@@ -180,7 +180,7 @@ bool PXIe5711::SendSoftTrigger()
     return true;
 }
 
-void PXIe5711::InitializeDevice()
+bool PXIe5711::InitializeDevice()
 {
     if(m_status != PXIe5711Status::Closed) CloseDevice();
     std::vector<PXIe5711Waveform> waveforms5711;
@@ -195,7 +195,7 @@ void PXIe5711::InitializeDevice()
         waveforms5711.push_back(waveform);
     }
     if(!receivewaveform(waveforms5711)) {
-        return;
+        return false;
     }
     SendSoftTrigger();
     CloseDevice();
