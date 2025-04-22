@@ -418,6 +418,7 @@ void JYDevice::on_Trigger_5322_clicked()
         return;
     }
     PXIe_5322_state = 2;
+    ui->Trigger_5322->setEnabled(false);
 }
 
 

@@ -280,7 +280,7 @@
           <x>40</x>
           <y>160</y>
           <width>239</width>
-          <height>25</height>
+          <height>51</height>
          </rect>
         </property>
         <layout class="QHBoxLayout" name="horizontalLayout_5">
@@ -316,9 +316,9 @@
        <widget class="QWidget" name="layoutWidget">
         <property name="geometry">
          <rect>
-          <x>110</x>
+          <x>60</x>
           <y>250</y>
-          <width>85</width>
+          <width>211</width>
           <height>96</height>
          </rect>
         </property>

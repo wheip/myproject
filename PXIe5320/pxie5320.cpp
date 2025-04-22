@@ -250,7 +250,6 @@ void PXIe5320::DeviceClose()
             qDebug() << errorMsg;
         }
         hDevice = nullptr;
-        qDebug() << "cardID:" << cardID << "Close";
     }
     
     // 更新状态为关闭

@@ -24,7 +24,7 @@ const QList<int> WaveformManageDialog::AVAILABLE_CHANNELS = [](){
 
 // 定义静态常量
 const QStringList WaveformManageDialog::ANALOG_POWER_TYPES = {"HighLevelWave", "LowLevelWave"};
-const QStringList WaveformManageDialog::DIGITAL_TYPES = {"SineWave", "SquareWave", "TriangleWave"};
+const QStringList WaveformManageDialog::DIGITAL_TYPES = {"SineWave", "SquareWave", "StepWave", "TriangleWave"};
 
 WaveformManageDialog::WaveformManageDialog(const int& stepId, const int& deviceId, QWidget *parent)
     : QDialog(parent)
@@ -192,7 +192,7 @@ void WaveformManageDialog::updateTableRow(int row, const PXIe5711Waveform& wavef
     tableWidget->setItem(row, 7, negativeItem);
     
     // ID列设置为只读
-    QTableWidgetItem *idItem = new QTableWidgetItem(waveform.id);
+    QTableWidgetItem *idItem = new QTableWidgetItem(QString::number(waveform.id));
     idItem->setFlags(idItem->flags() & ~Qt::ItemIsEditable);
     tableWidget->setItem(row, 8, idItem);
 }

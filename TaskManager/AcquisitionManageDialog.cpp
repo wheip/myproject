@@ -296,7 +296,7 @@ void AcquisitionManageDialog::updateTable()
     
     // 修改添加 PXIe5320 数据的部分
     for (const auto& acquisition : m_acquisitions) {
-        QTableWidgetItem *idItem = new QTableWidgetItem(acquisition.id);
+        QTableWidgetItem *idItem = new QTableWidgetItem(QString::number(acquisition.id));
         QTableWidgetItem *deviceItem = new QTableWidgetItem(QString::number(acquisition.device));
         QTableWidgetItem *portItem = new QTableWidgetItem(QString::number(acquisition.port));
         QTableWidgetItem *positiveItem = new QTableWidgetItem(QString::number(acquisition.positive_connect_location));
@@ -321,7 +321,7 @@ void AcquisitionManageDialog::updateTable()
     
     // 修改添加 8902 数据的部分
     for (const auto& data : m_data8902List) {
-        QTableWidgetItem *idItem = new QTableWidgetItem(data.id);
+        QTableWidgetItem *idItem = new QTableWidgetItem(QString::number(data.id));
         QTableWidgetItem *deviceItem = new QTableWidgetItem(QString::number(DEVICE_8902));
         QTableWidgetItem *typeItem = new QTableWidgetItem(data.model ? "DC " + PXIe8902_testtype_to_string(data.test_type) : "AC " + PXIe8902_testtype_to_string(data.test_type));
         QTableWidgetItem *positiveItem = new QTableWidgetItem(QString::number(data.positive_connect_location));
